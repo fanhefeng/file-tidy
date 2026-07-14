@@ -1,0 +1,15 @@
+{
+  "name": "file-tidy",
+  "version": "0.3.0",
+  "description": "Organize files into type/year-month folders with byte-level deduplication",
+  "type": "module",
+  "bin": {
+    "tidy": "bin/tidy.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "exifr": "^7.1.3"
+  }
+}

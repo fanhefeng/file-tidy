@@ -1,0 +1,51 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "file-tidy",
+  "title": "File Tidy",
+  "description": "按 类型/年月 归档文件并做字节级去重（file-tidy 的 Raycast 前端）",
+  "icon": "icon.png",
+  "author": "fanhefeng",
+  "platforms": ["macOS", "Windows"],
+  "categories": ["Productivity"],
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "tidy-folder",
+      "title": "Tidy Folder",
+      "description": "整理文件夹：按 类型/年月 归档并隔离重复文件，执行前先预览",
+      "mode": "view",
+      "keywords": ["整理", "归档", "tidy", "organize"]
+    },
+    {
+      "name": "undo-tidy",
+      "title": "Undo Last Tidy",
+      "description": "撤销上一次整理，把文件移回原位",
+      "mode": "view",
+      "keywords": ["撤销", "undo"]
+    }
+  ],
+  "preferences": [
+    {
+      "name": "defaultDest",
+      "type": "directory",
+      "required": false,
+      "title": "默认归档目录",
+      "description": "不在表单里选目标目录时使用；留空则每次必须在表单里选择"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.102.6",
+    "file-tidy": "link:.."
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.0.10",
+    "typescript": "^5.8.2"
+  },
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "lint": "ray lint",
+    "publish": "npx @raycast/api@latest publish"
+  }
+}

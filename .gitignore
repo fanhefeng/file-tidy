@@ -1,0 +1,4 @@
+node_modules/
+raycast/dist/
+.tidy/
+.DS_Store
