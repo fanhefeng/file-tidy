@@ -8,7 +8,7 @@
 /* eslint-disable @typescript-eslint/ban-types */
 
 type ExtensionPreferences = {
-  /** 默认归档目录 - 不在表单里选目标目录时使用；留空则每次必须在表单里选择 */
+  /** Default Destination - Used when no destination is picked in the form; leave unset to always pick one explicitly */
   "defaultDest"?: string
 }
 

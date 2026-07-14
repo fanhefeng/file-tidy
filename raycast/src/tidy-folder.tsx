@@ -16,11 +16,11 @@ import {
 } from "@raycast/api";
 import fs from "node:fs";
 import { useState } from "react";
-import { buildExtIndex, isInsideDir, loadConfig } from "file-tidy/src/config.js";
-import { findDuplicates } from "file-tidy/src/dedup.js";
-import { executePlan } from "file-tidy/src/execute.js";
-import { buildPlan, formatSize, type PlanEntry } from "file-tidy/src/plan.js";
-import { scanDest, scanSource } from "file-tidy/src/scan.js";
+import { buildExtIndex, isInsideDir, loadConfig } from "./core/config.js";
+import { findDuplicates } from "./core/dedup.js";
+import { executePlan } from "./core/execute.js";
+import { buildPlan, formatSize, type PlanEntry } from "./core/plan.js";
+import { scanDest, scanSource } from "./core/scan.js";
 
 interface Preferences {
   defaultDest?: string;
@@ -44,21 +44,21 @@ export default function TidyFolderCommand() {
   async function handleSubmit(values: FormValues) {
     const sourceDir = values.source[0];
     if (!sourceDir) {
-      setSourceError("请选择要整理的文件夹");
+      setSourceError("Pick a folder to tidy");
       return;
     }
     const destDir = values.inPlace ? sourceDir : (values.dest[0] ?? defaultDest);
     if (!destDir) {
-      setDestError("请选择归档目录，或在扩展设置里配置默认归档目录");
+      setDestError("Pick a destination folder, or set a default one in the extension preferences");
       return;
     }
     if (!values.inPlace && isInsideDir(sourceDir, destDir)) {
-      setDestError("归档目录不能在源文件夹内部；想在源文件夹内整理请勾选「就地整理」");
+      setDestError("Destination can't be inside the source folder; enable “Tidy in place” instead");
       return;
     }
 
     setLoading(true);
-    const toast = await showToast({ style: Toast.Style.Animated, title: "扫描中…" });
+    const toast = await showToast({ style: Toast.Style.Animated, title: "Scanning…" });
     try {
       const config = loadConfig();
       const organizedDirs = new Set([...Object.keys(config.categories), config.fallbackCategory, "Duplicates"]);
@@ -68,8 +68,8 @@ export default function TidyFolderCommand() {
       });
       if (!sourceFiles.length) {
         toast.style = Toast.Style.Failure;
-        toast.title = "没有需要整理的文件";
-        toast.message = "隐藏文件和子文件夹会被跳过，需要递归请勾选「递归整理」";
+        toast.title = "Nothing to tidy";
+        toast.message = "Hidden files and subfolders are skipped; enable “Include subfolders” to recurse";
         return;
       }
       const destFiles = scanDest(destDir, values.inPlace ? { onlyDirs: organizedDirs } : undefined);
@@ -85,7 +85,7 @@ export default function TidyFolderCommand() {
       push(<PlanView entries={entries} sourceDir={sourceDir} destDir={destDir} />);
     } catch (err) {
       toast.style = Toast.Style.Failure;
-      toast.title = "扫描失败";
+      toast.title = "Scan failed";
       toast.message = err instanceof Error ? err.message : String(err);
     } finally {
       setLoading(false);
@@ -97,13 +97,13 @@ export default function TidyFolderCommand() {
       isLoading={loading}
       actions={
         <ActionPanel>
-          <Action.SubmitForm title="预览整理计划" icon={Icon.MagnifyingGlass} onSubmit={handleSubmit} />
+          <Action.SubmitForm title="Preview Tidy Plan" icon={Icon.MagnifyingGlass} onSubmit={handleSubmit} />
         </ActionPanel>
       }
     >
       <Form.FilePicker
         id="source"
-        title="要整理的文件夹"
+        title="Folder to Tidy"
         allowMultipleSelection={false}
         canChooseDirectories
         canChooseFiles={false}
@@ -112,24 +112,28 @@ export default function TidyFolderCommand() {
       />
       <Form.Checkbox
         id="inPlace"
-        label="就地整理（分类目录直接建在源文件夹内）"
+        label="Tidy in place (create category folders inside the source folder)"
         value={inPlace}
         onChange={setInPlace}
       />
       {!inPlace && (
         <Form.FilePicker
           id="dest"
-          title="归档目录"
+          title="Destination"
           allowMultipleSelection={false}
           canChooseDirectories
           canChooseFiles={false}
-          info={defaultDest ? `留空则使用默认归档目录：${defaultDest}` : "留空则使用扩展设置里的默认归档目录（当前未配置）"}
+          info={
+            defaultDest
+              ? `Leave empty to use the default destination: ${defaultDest}`
+              : "Leave empty to use the default destination from preferences (not set yet)"
+          }
           error={destError}
           onChange={() => setDestError(undefined)}
         />
       )}
-      <Form.Checkbox id="recursive" label="递归整理子文件夹" defaultValue={false} />
-      <Form.Description text="提交后会先显示整理计划，确认后才会移动文件。" />
+      <Form.Checkbox id="recursive" label="Include subfolders" defaultValue={false} />
+      <Form.Description text="You'll see the full plan first — nothing moves until you confirm." />
     </Form>
   );
 }
@@ -147,44 +151,44 @@ function PlanView({ entries, sourceDir, destDir }: { entries: PlanEntry[]; sourc
   async function execute() {
     const destMissing = !fs.existsSync(destDir);
     const ok = await confirmAlert({
-      title: destMissing ? "新建归档目录并执行整理？" : "确认执行整理？",
+      title: destMissing ? "Create destination and tidy?" : "Run this tidy plan?",
       message:
-        `${destMissing ? `目标目录 ${destDir} 不存在，将会新建。\n` : ""}` +
-        `归档 ${archives.length} 个文件，隔离重复 ${dups.length} 个 → ${destDir}`,
-      primaryAction: { title: "执行", style: Alert.ActionStyle.Default },
+        `${destMissing ? `Destination ${destDir} doesn't exist and will be created.\n` : ""}` +
+        `Archive ${archives.length} files, quarantine ${dups.length} duplicates → ${destDir}`,
+      primaryAction: { title: "Tidy", style: Alert.ActionStyle.Default },
     });
     if (!ok) return;
 
-    const toast = await showToast({ style: Toast.Style.Animated, title: "整理中…" });
+    const toast = await showToast({ style: Toast.Style.Animated, title: "Tidying…" });
     try {
       const { moved } = executePlan(entries, { destDir, sourceDir });
       const dupCount = moved.filter((e) => e.action === "duplicate").length;
       toast.style = Toast.Style.Success;
-      toast.title = `完成：归档 ${moved.length - dupCount} 个，隔离重复 ${dupCount} 个`;
-      toast.message = "可用「Undo Last Tidy」撤销";
+      toast.title = `Done: ${moved.length - dupCount} archived, ${dupCount} duplicates quarantined`;
+      toast.message = "Use “Undo Last Tidy” to revert";
       toast.primaryAction = {
-        title: "打开归档目录",
+        title: "Open Destination",
         onAction: () => open(destDir),
       };
       await popToRoot();
     } catch (err) {
       toast.style = Toast.Style.Failure;
-      toast.title = "整理失败";
+      toast.title = "Tidy failed";
       toast.message = err instanceof Error ? err.message : String(err);
     }
   }
 
   const executeAction = (
     <ActionPanel>
-      <Action title="执行整理" icon={Icon.Checkmark} onAction={execute} />
-      <Action.ShowInFinder title="在文件管理器中显示源文件夹" path={sourceDir} />
+      <Action title="Run Tidy Plan" icon={Icon.Checkmark} onAction={execute} />
+      <Action.ShowInFinder title="Show Source Folder" path={sourceDir} />
     </ActionPanel>
   );
 
   return (
-    <List navigationTitle={`整理计划 → ${destDir}（共 ${entries.length} 个文件）`}>
+    <List navigationTitle={`Tidy Plan → ${destDir} (${entries.length} files)`}>
       {[...byBucket.keys()].sort().map((bucket) => (
-        <List.Section key={bucket} title={bucket} subtitle={`${byBucket.get(bucket)!.length} 个`}>
+        <List.Section key={bucket} title={bucket} subtitle={`${byBucket.get(bucket)!.length} files`}>
           {byBucket.get(bucket)!.map((e) => (
             <List.Item
               key={e.from}
@@ -196,7 +200,7 @@ function PlanView({ entries, sourceDir, destDir }: { entries: PlanEntry[]; sourc
                   tag:
                     e.dateSource === "exif"
                       ? { value: "EXIF", color: Color.Green }
-                      : { value: "文件日期", color: Color.SecondaryText },
+                      : { value: "file date", color: Color.SecondaryText },
                 },
               ]}
               actions={executeAction}
@@ -205,12 +209,12 @@ function PlanView({ entries, sourceDir, destDir }: { entries: PlanEntry[]; sourc
         </List.Section>
       ))}
       {dups.length > 0 && (
-        <List.Section title="Duplicates（重复文件，移入隔离区）" subtitle={`${dups.length} 个`}>
+        <List.Section title="Duplicates (quarantined)" subtitle={`${dups.length} files`}>
           {dups.map((e) => (
             <List.Item
               key={e.from}
               title={e.name}
-              subtitle={`与之相同: ${e.keeperPath}`}
+              subtitle={`identical to ${e.keeperPath}`}
               icon={{ source: Icon.Duplicate, tintColor: Color.Magenta }}
               accessories={[{ text: formatSize(e.size) }]}
               actions={executeAction}

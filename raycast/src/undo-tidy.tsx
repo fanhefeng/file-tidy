@@ -13,7 +13,7 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import { useState } from "react";
-import { undoLastRun } from "file-tidy/src/undo.js";
+import { undoLastRun } from "./core/undo.js";
 
 interface Preferences {
   defaultDest?: string;
@@ -26,7 +26,7 @@ export default function UndoTidyCommand() {
   async function handleSubmit(values: { dest: string[] }) {
     const destDir = values.dest[0] ?? defaultDest;
     if (!destDir) {
-      setDestError("请选择上次整理的归档目录");
+      setDestError("Pick the destination folder of the last tidy run");
       return;
     }
     const runsDir = path.join(destDir, ".tidy", "runs");
@@ -39,8 +39,8 @@ export default function UndoTidyCommand() {
     if (!runs.length) {
       await showToast({
         style: Toast.Style.Failure,
-        title: "没有可撤销的整理记录",
-        message: `${destDir} 下没有 .tidy/runs 记录（就地整理请选源文件夹本身）`,
+        title: "No tidy run to undo",
+        message: `No .tidy/runs records under ${destDir} (for in-place runs, pick the source folder itself)`,
       });
       return;
     }
@@ -52,29 +52,30 @@ export default function UndoTidyCommand() {
       sourceDir: string;
     };
     const ok = await confirmAlert({
-      title: "撤销上一次整理？",
-      message: `${new Date(time).toLocaleString("zh-CN")} 的整理，共 ${moves.length} 个文件将移回 ${sourceDir}`,
-      primaryAction: { title: "撤销", style: Alert.ActionStyle.Default },
+      title: "Undo the last tidy run?",
+      message: `Run from ${new Date(time).toLocaleString()}: ${moves.length} files will move back to ${sourceDir}`,
+      primaryAction: { title: "Undo", style: Alert.ActionStyle.Default },
     });
     if (!ok) return;
 
-    const toast = await showToast({ style: Toast.Style.Animated, title: "撤销中…" });
+    const toast = await showToast({ style: Toast.Style.Animated, title: "Undoing…" });
     try {
       undoLastRun(destDir);
       // undoLastRun renames the manifest to *.undone only when every file went back.
       if (!fs.existsSync(latestPath)) {
         toast.style = Toast.Style.Success;
-        toast.title = `已撤销：${moves.length} 个文件移回原位`;
+        toast.title = `Undone: ${moves.length} files moved back`;
         toast.message = sourceDir;
         await popToRoot();
       } else {
         toast.style = Toast.Style.Failure;
-        toast.title = "部分撤销";
-        toast.message = "个别文件未能移回（可能已被移动或原位置有同名文件），记录已保留，可再次尝试";
+        toast.title = "Partial undo";
+        toast.message =
+          "Some files couldn't be moved back (already moved, or a name clash at the original spot). The record is kept — you can retry.";
       }
     } catch (err) {
       toast.style = Toast.Style.Failure;
-      toast.title = "撤销失败";
+      toast.title = "Undo failed";
       toast.message = err instanceof Error ? err.message : String(err);
     }
   }
@@ -83,19 +84,19 @@ export default function UndoTidyCommand() {
     <Form
       actions={
         <ActionPanel>
-          <Action.SubmitForm title="撤销上一次整理" icon={Icon.Undo} onSubmit={handleSubmit} />
+          <Action.SubmitForm title="Undo Last Tidy" icon={Icon.Undo} onSubmit={handleSubmit} />
         </ActionPanel>
       }
     >
       <Form.FilePicker
         id="dest"
-        title="上次整理的归档目录"
+        title="Destination of Last Run"
         allowMultipleSelection={false}
         canChooseDirectories
         canChooseFiles={false}
         info={
-          (defaultDest ? `留空则使用默认归档目录：${defaultDest}。` : "") +
-          "如果上次是「就地整理」，请选源文件夹本身。"
+          (defaultDest ? `Leave empty to use the default destination: ${defaultDest}. ` : "") +
+          "If the last run was in-place, pick the source folder itself."
         }
         error={destError}
         onChange={() => setDestError(undefined)}
