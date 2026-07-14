@@ -4,7 +4,7 @@
   "title": "File Tidy",
   "description": "Organize folders into type/year-month archives with byte-level duplicate detection and one-step undo",
   "icon": "icon.png",
-  "author": "fanhefeng",
+  "author": "fhf1121",
   "platforms": ["macOS", "Windows"],
   "categories": ["Productivity"],
   "license": "MIT",
