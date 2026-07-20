@@ -47,6 +47,8 @@ test("归档到 类型/年月 并写运行清单", async () => {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   assert.equal(manifest.moves.length, 3);
   assert.equal(manifest.sourceDir, src);
+  // 原子写不残留临时文件
+  assert.equal(fs.readdirSync(path.dirname(manifestPath)).filter((f) => f.endsWith(".tmp")).length, 0);
 });
 
 test("同内容不同名的文件被隔离到 Duplicates 并写 manifest.md", async () => {
