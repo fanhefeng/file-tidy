@@ -1,4 +1,5 @@
 node_modules/
 raycast/dist/
+raycast/pnpm-lock.yaml
 .tidy/
 .DS_Store
