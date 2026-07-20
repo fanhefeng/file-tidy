@@ -1,5 +1,5 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
 /**
  * List regular files to organize under sourceDir.
@@ -16,7 +16,7 @@ export function scanSource(sourceDir, { recursive = false, excludeTopDirs } = {}
 
 function walk(dir, out, recursive, excludeDirs) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) continue;
+    if (entry.name.startsWith(".")) continue;
     const full = path.join(dir, entry.name);
     if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
@@ -47,9 +47,9 @@ function walk(dir, out, recursive, excludeDirs) {
 export function scanDest(destDir, { onlyDirs } = {}) {
   const files = [];
   if (!fs.existsSync(destDir)) return files;
-  const skip = new Set(['.tidy', 'Duplicates']);
+  const skip = new Set([".tidy", "Duplicates"]);
   for (const entry of fs.readdirSync(destDir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.') || skip.has(entry.name)) continue;
+    if (entry.name.startsWith(".") || skip.has(entry.name)) continue;
     const full = path.join(destDir, entry.name);
     if (entry.isDirectory()) {
       if (onlyDirs && !onlyDirs.has(entry.name)) continue;

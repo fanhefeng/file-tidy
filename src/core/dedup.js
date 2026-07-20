@@ -1,13 +1,13 @@
-import crypto from 'node:crypto';
-import fs from 'node:fs';
+import crypto from "node:crypto";
+import fs from "node:fs";
 
 const QUICK_CHUNK = 64 * 1024;
 
 /** Hash of the first and last 64KB — cheap prefilter for same-size files. */
 function quickHash(filePath, size) {
-  const fd = fs.openSync(filePath, 'r');
+  const fd = fs.openSync(filePath, "r");
   try {
-    const hash = crypto.createHash('sha256');
+    const hash = crypto.createHash("sha256");
     const head = Buffer.alloc(Math.min(QUICK_CHUNK, size));
     fs.readSync(fd, head, 0, head.length, 0);
     hash.update(head);
@@ -16,7 +16,7 @@ function quickHash(filePath, size) {
       fs.readSync(fd, tail, 0, tail.length, size - tail.length);
       hash.update(tail);
     }
-    return hash.digest('hex');
+    return hash.digest("hex");
   } finally {
     fs.closeSync(fd);
   }
@@ -24,11 +24,11 @@ function quickHash(filePath, size) {
 
 function fullHash(filePath) {
   return new Promise((resolve, reject) => {
-    const hash = crypto.createHash('sha256');
+    const hash = crypto.createHash("sha256");
     fs.createReadStream(filePath)
-      .on('data', (chunk) => hash.update(chunk))
-      .on('end', () => resolve(hash.digest('hex')))
-      .on('error', reject);
+      .on("data", (chunk) => hash.update(chunk))
+      .on("end", () => resolve(hash.digest("hex")))
+      .on("error", reject);
   });
 }
 
@@ -87,11 +87,12 @@ function addTo(map, key, value) {
  */
 function pickKeeper(identical) {
   const scored = identical.map((f) => ({ f, penalty: namePenalty(f.name) }));
-  scored.sort((a, b) =>
-    (b.f.inDest - a.f.inDest) ||
-    (a.penalty - b.penalty) ||
-    (a.f.name.length - b.f.name.length) ||
-    (a.f.birthtime - b.f.birthtime)
+  scored.sort(
+    (a, b) =>
+      b.f.inDest - a.f.inDest ||
+      a.penalty - b.penalty ||
+      a.f.name.length - b.f.name.length ||
+      a.f.birthtime - b.f.birthtime,
   );
   return scored[0].f;
 }

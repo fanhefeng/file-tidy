@@ -49,24 +49,30 @@ tidy undo --dest ~/Archive          # 撤销上一次
 
 CLI 和 Raycast 扩展读的是同一份配置。加类别、改扩展名归属、固定默认归档目录都在这里。
 
-## 仓库结构
+## 仓库结构与同步流程
 
 ```
-bin/tidy.js     CLI 入口
-src/            CLI 的核心逻辑
-raycast/        Raycast 扩展（自带一份 src/core/，见下）
+src/core/        ★ 唯一真源：纯逻辑，不含面向用户文案（附 .d.ts 类型声明）
+bin/tidy.js      CLI 适配层：中文文案、终端交互
+raycast/src/     Raycast 适配层：英文文案、表单与列表 UI
+raycast/src/core 生成物 —— 由 sync 脚本从 src/core 原样复制，勿手改
+scripts/sync.js  同步脚本
+test/            核心逻辑冒烟测试（node:test）
 ```
 
-### 关于 raycast/ 的两份历史
+core 只返回数据、抛带 `code` 的错误；所有"说话"（中文/英文文案）都在各自适配层。因此两份 core 字节相同，同步就是复制：
 
-`raycast/` 这个目录同时存在于两个地方，改动时**两边都要推**：
+```bash
+pnpm test        # 跑测试 + 校验 raycast/src/core 未漂移
+pnpm sync        # src/core → raycast/src/core
+pnpm sync:fork   # 再把 raycast/ 镜像到 fork 的 extensions/file-tidy/（commit/push 手动）
+```
 
-1. **本仓库** —— 项目的源头，CLI 和扩展都在这里开发。
-2. **`raycast/extensions` 的 fork**（`fanhefeng/extensions` 分支 `ext/file-tidy`，本地检出在 `~/.config/raycast/public-extensions-fork`）—— 提交给 Raycast Store 的那份，只包含 `raycast/` 目录的内容，平铺成 `extensions/file-tidy/`。对应 PR：[raycast/extensions#29437](https://github.com/raycast/extensions/pull/29437)，截至目前仍在等待官方 review。
+### 与 Raycast Store 的关系
 
-两边的提交历史是各自独立的，没有 remote 关系，也没有自动同步。只在本仓库改而忘了同步 fork，Store 上的版本就会落后；反过来只在 fork 上改（比如按审核意见临时修），本仓库就会丢掉那次改动 —— 目前 fork 上因审核产生的 4 次修改都已回流到这里。
+Store 要求扩展目录自包含，PR 也只能包含 `extensions/file-tidy/` 一个目录，所以扩展无法直接 import 本仓库的 core —— 这就是 `raycast/src/core/` 这份复制存在的原因。提交渠道是 `raycast/extensions` 的 fork（`fanhefeng/extensions` 分支 `ext/file-tidy`，本地检出在 `~/.config/raycast/public-extensions-fork`），对应 PR：[raycast/extensions#29437](https://github.com/raycast/extensions/pull/29437)。
 
-另外 `raycast/src/core/` 是 `src/` 的一份副本加了 `.d.ts` 类型声明：Store 要求扩展目录自包含，不能引用目录外的文件。改核心逻辑时记得两处同步。
+日常改动流程：改 `src/core/` 或适配层 → `pnpm test` → `pnpm sync:fork` → 在 fork 里 commit + push，PR 自动更新。
 
 ## 更新记录
 

@@ -1,6 +1,6 @@
 {
   "name": "file-tidy",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Organize files into type/year-month folders with byte-level deduplication",
   "type": "module",
   "bin": {
@@ -8,6 +8,11 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/core.test.js && node scripts/sync.js --check",
+    "sync": "node scripts/sync.js",
+    "sync:fork": "node scripts/sync.js --fork"
   },
   "dependencies": {
     "exifr": "^7.1.3"

@@ -2,7 +2,29 @@
 
 本文件记录整个项目（CLI + Raycast 扩展）的变更。`raycast/CHANGELOG.md` 是给 Raycast Store 用的另一份，只记面向扩展用户的变更。
 
-## [未发布]
+## [0.4.0] - 2026-07-20
+
+core 单一化重构 + CLI 缺陷修复。
+
+**架构**
+
+- `src/core/` 成为唯一真源：纯逻辑、无面向用户文案（错误带 `code`，撤销返回结构化结果），中文/英文措辞分别归 CLI（`bin/tidy.js`）和 Raycast 适配层。
+- `raycast/src/core/` 降级为生成物，由 `pnpm sync` 从 `src/core` 原样复制；`pnpm sync:fork` 一并镜像到 Store fork。`pnpm test` 含漂移校验。
+- 新增核心逻辑冒烟测试（`test/core.test.js`，node:test，覆盖归档/去重/跨目录去重/撤销/冲突后缀）。
+
+**CLI 修复**（此前只修在 Raycast 那份 core 里，CLI 一直带病）
+
+- **源文件夹在归档目标内部时不再误判**：之前 `tidy ~/Downloads/mess --dest ~/Downloads` 会把源文件全部当成"与 dest 中自己重复"而移进 Duplicates；现在双向包含检查直接拦截。
+- 路径先经 `canonicalPath` 规范化，符号链接（如 macOS `/var` → `/private/var`）无法绕过包含检查。
+- 运行清单改为"先记录后移动"，中途失败也不会出现无记录的移动，撤销不漏文件。
+- 撤销时正确跳过"记录了但从未执行"的移动条目。
+
+**行为变化**
+
+- Duplicates 清单文件名统一为 `manifest.md`（原 CLI 写 `清单.md`，与 Raycast 扩展写的 `manifest.md` 会在同一目标目录裂成两份）；旧的 `清单.md` 不迁移，留在原处。
+- Raycast 的 Undo 命令改用结构化撤销结果，部分失败时能报出准确的成功/失败数。
+
+## [0.3.1] - 2026-07-20
 
 - 补充根目录 README 和本更新记录。
 
