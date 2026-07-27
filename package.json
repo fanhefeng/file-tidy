@@ -1,7 +1,7 @@
 {
   "name": "file-tidy",
-  "version": "0.4.0",
-  "description": "Organize files into type/year-month folders with byte-level deduplication",
+  "version": "0.5.0",
+  "description": "Organize files into prefixed category folders with byte-level dedup, near-duplicate and similar-image detection, and one-step undo",
   "type": "module",
   "bin": {
     "tidy": "bin/tidy.js"
