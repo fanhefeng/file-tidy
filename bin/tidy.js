@@ -105,7 +105,7 @@ async function main() {
     throw new Error("源文件夹和归档目标不能互相包含；想在源文件夹内整理请用 --in-place");
   }
 
-  if (flags.plain) config.detect = { similar: false, health: false, perceptual: false };
+  if (flags.plain) config.detect = false;
 
   const { entries, sourceFiles, counts } = await analyze({
     sourceDir,
@@ -142,19 +142,15 @@ async function main() {
   }
 
   const { moved, manifestPath } = executePlan(entries, { destDir, sourceDir, formatDupBlock: zhDupBlock });
-  const done = tally(moved);
   console.log(
-    styleText("green", `完成：归档 ${done.archive} 个，隔离重复 ${done.duplicate} 个，挑出待查 ${done.review} 个。`),
+    styleText(
+      "green",
+      `完成：归档 ${counts.archive} 个，隔离重复 ${counts.duplicate} 个，挑出待查 ${counts.review} 个。`,
+    ),
   );
   const firstDup = moved.find((e) => e.action === "duplicate");
   if (firstDup) console.log(`重复文件详情见 ${path.join(path.dirname(firstDup.to), "manifest.md")}`);
   console.log(styleText("dim", `本次记录: ${manifestPath}（可用 tidy undo 撤销）`));
-}
-
-function tally(entries) {
-  const counts = { archive: 0, duplicate: 0, review: 0 };
-  for (const e of entries) counts[e.action]++;
-  return counts;
 }
 
 function reportPhase(phase, info = {}) {
@@ -200,7 +196,8 @@ function printPlan(entries, { destDir, fallbackCategory, counts }) {
   console.log(styleText("bold", `\n整理计划（目标：${destDir}）\n`));
   for (const bucket of [...byBucket.keys()].sort()) {
     const items = byBucket.get(bucket);
-    const isFallback = bucket.split(path.sep)[0].endsWith(fallbackCategory);
+    // 按 entry 记录的类别判断，而不是解析目录名——自定义类别叫 MyOthers 时不误染
+    const isFallback = items[0].category === fallbackCategory;
     console.log(`  ${styleText(isFallback ? "yellow" : "cyan", bucket)}  (${items.length} 个)`);
     for (const e of items) {
       console.log(`    ${e.name}  ${styleText("dim", `[${formatSize(e.size)}${dateTag(e)}]`)}`);

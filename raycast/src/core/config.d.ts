@@ -13,7 +13,8 @@ export interface TidyConfig {
   folderPrefix: string;
   granularity: Record<string, Granularity>;
   subCategories: Record<string, SubCategoryRule[]>;
-  detect: { similar: boolean; health: boolean; perceptual: boolean };
+  /** Per-pass switches, or `false` to turn every detection pass off (current and future). */
+  detect: { similar: boolean; health: boolean; perceptual: boolean } | false;
   perceptualThreshold: number;
   _created?: boolean;
   /** Default categories missing from the user's config file (added in a later version). */

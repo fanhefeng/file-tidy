@@ -3,7 +3,6 @@ import type { SourceFile } from "./scan.js";
 export interface PerceptualInfo {
   peers: string[];
   best: boolean;
-  distance: number;
 }
 export interface HashCacheEntry {
   size: number;

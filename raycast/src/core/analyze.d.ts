@@ -22,6 +22,5 @@ export function analyze(input: {
 }): Promise<{
   entries: PlanEntry[];
   sourceFiles: SourceFile[];
-  organizedDirs: Set<string>;
   counts: AnalyzeCounts;
 }>;

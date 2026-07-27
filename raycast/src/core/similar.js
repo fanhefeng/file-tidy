@@ -18,6 +18,14 @@ import path from "node:path";
  * Returns Map<path, { reason, peers: string[], best: boolean }> where `best`
  * marks the copy this module would keep.
  */
+/**
+ * The shared keeper policy for size-based passes: the largest copy is the best
+ * source (least recompressed, fullest scan). `sizeOf` adapts item shapes.
+ */
+export function pickLargest(items, sizeOf = (f) => f.size) {
+  return items.reduce((a, b) => (sizeOf(b) > sizeOf(a) ? b : a));
+}
+
 export function findSimilar(files) {
   const flagged = new Map();
   // A file already grouped by an earlier (more specific) pass isn't regrouped.
@@ -104,8 +112,7 @@ function normalizedNameGroups(files) {
   return [...groups.values()].map((members) => ({
     reason: "normalized-name",
     members,
-    // Prefer the largest — for scans and re-encodes that's the better source.
-    best: members.reduce((a, b) => (b.size > a.size ? b : a)),
+    best: pickLargest(members),
   }));
 }
 
@@ -123,7 +130,7 @@ function stemGroups(files) {
     .map((members) => ({
       reason: "same-stem",
       members,
-      best: members.reduce((a, b) => (b.size > a.size ? b : a)),
+      best: pickLargest(members),
     }));
 }
 

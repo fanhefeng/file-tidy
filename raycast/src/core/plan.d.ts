@@ -27,7 +27,7 @@ export function buildPlan(input: {
   destDir: string;
   extIndex: Map<string, string>;
   fallbackCategory: string;
-  folderName?: (base: string) => string;
+  folderName: (base: string) => string;
   granularity?: Record<string, "month" | "year" | "none">;
   subIndex?: Map<string, { name: string; test: (file: SourceFile) => boolean }[]>;
   health?: Map<string, HealthIssue>;

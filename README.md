@@ -67,7 +67,7 @@ CLI 和 Raycast 扩展读的是同一份配置。可调的键：
 | `folderPrefix` | 生成目录的前缀，默认 `"ft_"`；设成 `""` 恢复旧命名 |
 | `granularity` | 每个类别的日期粒度：`"month"` / `"year"` / `"none"` |
 | `subCategories` | 二级分类规则，`match` 是正则、`exts` 是扩展名，自上而下首个命中生效 |
-| `detect` | 三项检测开关：`similar` / `health` / `perceptual` |
+| `detect` | 检测开关：`similar` / `health` / `perceptual`，或整体设为 `false` 全部关闭 |
 | `perceptualThreshold` | 图片相似度阈值（汉明距离），默认 5，调大更宽松 |
 
 `categories` 和 `subCategories` 是**整体替换**语义——这样你才能删掉不想要的类别。副作用是：升级后新增的默认类别不会自动进你已有的配置文件。检测到这种情况时会提示一行，让你自己决定加不加，工具不会擅自改你的配置。

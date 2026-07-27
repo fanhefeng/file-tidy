@@ -23,7 +23,9 @@ export async function buildPlan({
   destDir,
   extIndex,
   fallbackCategory,
-  folderName = (base) => base,
+  // Required, no identity fallback: a forgotten folderName would silently
+  // archive into un-prefixed folders instead of failing loudly.
+  folderName,
   granularity = {},
   subIndex = new Map(),
   health = new Map(),

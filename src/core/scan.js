@@ -28,16 +28,21 @@ function walk(dir, out, recursive, excludeDirs, includeJunk) {
       continue;
     }
     if (!entry.isFile()) continue;
-    const stat = fs.statSync(full);
-    out.push({
-      path: full,
-      name: entry.name,
-      ext: path.extname(entry.name).slice(1).toLowerCase(),
-      size: stat.size,
-      birthtime: realBirthtime(stat),
-      mtime: stat.mtime,
-    });
+    out.push(toSourceFile(full, entry.name));
   }
+}
+
+/** The one place the file record shape is built — walk and scanDest drifted apart when each spelled it out. */
+function toSourceFile(full, name) {
+  const stat = fs.statSync(full);
+  return {
+    path: full,
+    name,
+    ext: path.extname(name).slice(1).toLowerCase(),
+    size: stat.size,
+    birthtime: realBirthtime(stat),
+    mtime: stat.mtime,
+  };
 }
 
 /**
@@ -62,15 +67,7 @@ export function scanDest(destDir, { onlyDirs, skipDirs } = {}) {
       walk(full, files, true);
     } else if (entry.isFile()) {
       if (onlyDirs) continue;
-      const stat = fs.statSync(full);
-      files.push({
-        path: full,
-        name: entry.name,
-        ext: path.extname(entry.name).slice(1).toLowerCase(),
-        size: stat.size,
-        birthtime: realBirthtime(stat),
-        mtime: stat.mtime,
-      });
+      files.push(toSourceFile(full, entry.name));
     }
   }
   return files;

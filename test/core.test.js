@@ -29,7 +29,7 @@ async function plan(sourceDir, destDir, scanOpts = {}) {
   const sourceFiles = scanSource(sourceDir, scanOpts);
   const destFiles = scanDest(destDir, { skipDirs: new Set([".tidy", "Duplicates", "Review"]) });
   const duplicates = await findDuplicates(sourceFiles, destFiles);
-  return buildPlan({ sourceFiles, duplicates, destDir, extIndex, fallbackCategory: "Others" });
+  return buildPlan({ sourceFiles, duplicates, destDir, extIndex, fallbackCategory: "Others", folderName: (b) => b });
 }
 
 test("归档到 类型/年月 并写运行清单", async () => {

@@ -297,6 +297,26 @@ test("健康检查：问题文件进 ft_Review/<类别>/，正常文件不受影
   assert.equal(byName["ok.txt"], path.join("ft_Documents", yr, "ok.txt"));
 });
 
+test("detect: false 一键关闭全部检测，包括未来新增的检测项", async () => {
+  const src = tmp();
+  const dest = tmp();
+  write(src, "a.txt", "fine");
+  write(src, ".DS_Store", "junk");
+  write(src, "Guide-1.0.0.zip", "one");
+  write(src, "Guide-2.0.0.zip", "two");
+
+  const phases = [];
+  const { entries, counts } = await analyze({
+    sourceDir: src,
+    destDir: dest,
+    config: cfg({ detect: false }),
+    onPhase: (phase) => phases.push(phase),
+  });
+  assert.ok(!phases.includes("health") && !phases.includes("similar") && !phases.includes("perceptual"));
+  assert.equal(counts.review + counts.similar + counts.perceptual, 0);
+  assert.ok(entries.every((e) => e.action === "archive"));
+});
+
 test("健康检查关闭时，.DS_Store 不进扫描范围", async () => {
   const src = tmp();
   const dest = tmp();

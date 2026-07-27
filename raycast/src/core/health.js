@@ -29,11 +29,12 @@ export function checkHealth(files) {
   return issues;
 }
 
-/** OS/tooling debris that carries no user content. */
-const JUNK_NAMES = new Set([".DS_Store", "Thumbs.db", "desktop.ini", ".localized"]);
+/** OS/tooling debris that carries no user content (lowercase — FAT/exFAT volumes vary the case). */
+const JUNK_NAMES = new Set([".ds_store", "thumbs.db", "desktop.ini", ".localized"]);
 
 export function isJunk(name) {
-  return JUNK_NAMES.has(name) || name.startsWith("._");
+  const n = name.toLowerCase();
+  return JUNK_NAMES.has(n) || n.startsWith("._");
 }
 
 /**

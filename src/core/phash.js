@@ -3,6 +3,7 @@ import path from "node:path";
 import exifr from "exifr";
 import jpeg from "jpeg-js";
 import { PNG } from "pngjs";
+import { pickLargest } from "./similar.js";
 
 /**
  * Perceptual (difference) hashing for images — catches copies byte-level
@@ -167,13 +168,16 @@ function dHash({ data, width, height }) {
 }
 
 export function hammingDistance(a, b) {
-  let diff = a ^ b;
-  let count = 0;
-  while (diff) {
-    diff &= diff - 1n;
-    count++;
-  }
-  return count;
+  const diff = a ^ b;
+  return popcount32(Number(diff & 0xffffffffn)) + popcount32(Number(diff >> 32n));
+}
+
+/** Integer bit-twiddle popcount — a BigInt loop allocates per iteration and stalls on large pairwise scans. */
+function popcount32(x) {
+  x -= (x >>> 1) & 0x55555555;
+  x = (x & 0x33333333) + ((x >>> 2) & 0x33333333);
+  x = (x + (x >>> 4)) & 0x0f0f0f0f;
+  return (x * 0x01010101) >>> 24;
 }
 
 /**
@@ -181,9 +185,9 @@ export function hammingDistance(a, b) {
  * Single-link clustering over a small set — image counts here are in the
  * thousands at most, so the pairwise scan is fine.
  *
- * Returns Map<path, { peers: string[], best: boolean, distance: number }>,
- * where `best` marks the largest file in the cluster (usually the original,
- * least-recompressed copy).
+ * Returns Map<path, { peers: string[], best: boolean }>, where `best` marks
+ * the largest file in the cluster (usually the original, least-recompressed
+ * copy).
  */
 export function clusterByHash(hashes, filesByPath, threshold = 5) {
   const paths = [...hashes.keys()];
@@ -200,18 +204,9 @@ export function clusterByHash(hashes, filesByPath, threshold = 5) {
     if (ra !== rb) parent.set(ra, rb);
   };
 
-  const nearest = new Map();
   for (let i = 0; i < paths.length; i++) {
     for (let j = i + 1; j < paths.length; j++) {
-      const d = hammingDistance(hashes.get(paths[i]), hashes.get(paths[j]));
-      if (d > threshold) continue;
-      union(paths[i], paths[j]);
-      for (const [a, b] of [
-        [paths[i], paths[j]],
-        [paths[j], paths[i]],
-      ]) {
-        if (!nearest.has(a) || nearest.get(a).d > d) nearest.set(a, { d, peer: b });
-      }
+      if (hammingDistance(hashes.get(paths[i]), hashes.get(paths[j])) <= threshold) union(paths[i], paths[j]);
     }
   }
 
@@ -225,13 +220,9 @@ export function clusterByHash(hashes, filesByPath, threshold = 5) {
   const result = new Map();
   for (const members of clusters.values()) {
     if (members.length < 2) continue;
-    const best = members.reduce((a, b) => ((filesByPath.get(b)?.size ?? 0) > (filesByPath.get(a)?.size ?? 0) ? b : a));
+    const best = pickLargest(members, (p) => filesByPath.get(p)?.size ?? 0);
     for (const p of members) {
-      result.set(p, {
-        peers: members.filter((m) => m !== p),
-        best: p === best,
-        distance: nearest.get(p)?.d ?? 0,
-      });
+      result.set(p, { peers: members.filter((m) => m !== p), best: p === best });
     }
   }
   return result;

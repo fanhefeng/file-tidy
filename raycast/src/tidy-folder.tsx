@@ -85,7 +85,7 @@ export default function TidyFolderCommand() {
     const toast = await showToast({ style: Toast.Style.Animated, title: "Scanning…" });
     try {
       const config = loadConfig();
-      if (!values.smart) config.detect = { similar: false, health: false, perceptual: false };
+      if (!values.smart) config.detect = false;
       const { entries, sourceFiles, counts } = await analyze({
         sourceDir,
         destDir,
@@ -210,13 +210,9 @@ function PlanView({
 
     const toast = await showToast({ style: Toast.Style.Animated, title: "Tidying…" });
     try {
-      const { moved } = executePlan(entries, { destDir, sourceDir });
-      const dupCount = moved.filter((e) => e.action === "duplicate").length;
-      const reviewCount = moved.filter((e) => e.action === "review").length;
+      executePlan(entries, { destDir, sourceDir });
       toast.style = Toast.Style.Success;
-      toast.title =
-        `Done: ${moved.length - dupCount - reviewCount} archived, ` +
-        `${dupCount} duplicates, ${reviewCount} to review`;
+      toast.title = `Done: ${counts.archive} archived, ${counts.duplicate} duplicates, ${counts.review} to review`;
       toast.message = "Use “Undo Last Tidy” to revert";
       toast.primaryAction = {
         title: "Open Destination",

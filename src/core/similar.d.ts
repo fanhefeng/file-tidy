@@ -6,3 +6,4 @@ export interface SimilarInfo {
   peers: string[];
 }
 export function findSimilar(files: SourceFile[]): Map<string, SimilarInfo>;
+export function pickLargest<T>(items: T[], sizeOf?: (item: T) => number): T;

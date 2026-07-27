@@ -186,8 +186,9 @@ export function loadConfig() {
   if (raw.categories) config.categories = raw.categories;
   if (raw.subCategories) config.subCategories = raw.subCategories;
   // Keyed switches: merge, so writing one key doesn't silently reset the rest.
+  // `detect: false` is the everything-off shorthand and passes through as-is.
   config.granularity = { ...DEFAULT_CONFIG.granularity, ...raw.granularity };
-  config.detect = { ...DEFAULT_CONFIG.detect, ...raw.detect };
+  config.detect = raw.detect === false ? false : { ...DEFAULT_CONFIG.detect, ...raw.detect };
   // Because categories replace rather than merge, a config written by an older
   // version silently misses categories added since. Report the gap so adapters
   // can point it out instead of quietly filing those files under Others — but
