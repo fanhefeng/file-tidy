@@ -4,14 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { parseArgs, styleText } from "node:util";
-import { buildExtIndex, canonicalPath, expandTilde, isInsideDir, loadConfig } from "../src/core/config.js";
-import { findDuplicates } from "../src/core/dedup.js";
+import { analyze } from "../src/core/analyze.js";
+import { canonicalPath, expandTilde, isInsideDir, loadConfig } from "../src/core/config.js";
 import { executePlan } from "../src/core/execute.js";
-import { buildPlan, formatSize } from "../src/core/plan.js";
-import { scanDest, scanSource } from "../src/core/scan.js";
+import { bucketLabel, formatSize } from "../src/core/plan.js";
 import { undoLastRun } from "../src/core/undo.js";
 
-const HELP = `tidy — 按 类型/年月 归档文件并做字节级去重
+const HELP = `tidy — 归档文件、去重、挑出坏文件
 
 用法:
   tidy [源文件夹] [选项]     整理指定文件夹（不传则弹出文件夹选择框）
@@ -24,9 +23,32 @@ const HELP = `tidy — 按 类型/年月 归档文件并做字节级去重
   --yes, -y       跳过整理确认直接执行（不跳过"新建目标目录"的询问）
   --dry-run, -n   只预览，不移动任何文件
   --recursive, -r 递归整理子文件夹（默认只整理顶层文件）
+  --plain         关闭疑似重复、坏文件、相似图片三项检测，只做基础归档与字节去重
   --help, -h      显示帮助
 
-配置: ~/.config/tidy/config.json（类别与扩展名映射可自定义）`;
+归档结构: <前缀><类别>/[子类]/[日期]/ —— 前缀默认 ft_，用来和你自己建的目录区分。
+照片视频按年-月分，文档按年分，安装包不按日期分；这些都能在配置里改。
+
+配置: ~/.config/tidy/config.json`;
+
+// ---------- 中文文案表（core 只给 code，措辞都在这里；定义在 main() 之前避免 TDZ） ----------
+
+const PHASE_TEXT = {
+  scanning: () => "扫描文件…",
+  dedup: ({ files }) => `字节级去重（${files} 个文件）…`,
+  health: () => "检查坏文件与系统垃圾…",
+  similar: () => "查找疑似重复…",
+  perceptual: ({ files, done }) => (done || !files ? null : `比对相似图片（${files} 张）…`),
+  planning: () => "生成整理计划…",
+};
+
+const ISSUE_TEXT = { empty: "0 字节空文件", corrupt: "内容与扩展名不符", junk: "系统垃圾文件" };
+
+const SIMILAR_TEXT = {
+  versioned: "同一软件的其他版本",
+  "normalized-name": "换个名字的同一份东西",
+  "same-stem": "同名的另一种格式",
+};
 
 main().catch((err) => {
   console.error(styleText("red", `出错了: ${zhError(err)}`));
@@ -42,6 +64,7 @@ async function main() {
       yes: { type: "boolean", short: "y", default: false },
       "dry-run": { type: "boolean", short: "n", default: false },
       recursive: { type: "boolean", short: "r", default: false },
+      plain: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
     allowPositionals: true,
@@ -55,6 +78,14 @@ async function main() {
   const config = loadConfig();
   if (config._created) {
     console.log(styleText("dim", `已生成默认配置: ${config._path}`));
+  } else if (config._staleCategories?.length) {
+    console.log(
+      styleText(
+        "yellow",
+        `提示：新版新增了 ${config._staleCategories.join("、")} 类别，但你的配置文件里没有，` +
+          `这些文件会落到 ${config.fallbackCategory}。想启用就在 ${config._path} 的 categories 里加上。`,
+      ),
+    );
   }
   if (positionals[0] === "undo") {
     const destDir = canonicalPath(expandTilde(flags.dest ?? config.dest ?? (await askDestDir("上次整理的归档目录？"))));
@@ -74,32 +105,22 @@ async function main() {
     throw new Error("源文件夹和归档目标不能互相包含；想在源文件夹内整理请用 --in-place");
   }
 
-  // In-place mode: category folders live inside the source dir, so exclude
-  // them from the source scan and treat only them as the archived area.
-  const organizedDirs = new Set([...Object.keys(config.categories), config.fallbackCategory, "Duplicates"]);
+  if (flags.plain) config.detect = { similar: false, health: false, perceptual: false };
 
-  console.log(`扫描 ${sourceDir} …`);
-  const sourceFiles = scanSource(sourceDir, {
+  const { entries, sourceFiles, counts } = await analyze({
+    sourceDir,
+    destDir,
+    config,
     recursive: flags.recursive,
-    excludeTopDirs: inPlace ? organizedDirs : undefined,
+    inPlace,
+    onPhase: reportPhase,
   });
   if (!sourceFiles.length) {
     console.log("没有需要整理的文件（隐藏文件和子文件夹会被跳过，递归请加 --recursive）。");
     return;
   }
 
-  const destFiles = scanDest(destDir, inPlace ? { onlyDirs: organizedDirs } : undefined);
-  const duplicates = await findDuplicates(sourceFiles, destFiles);
-  const extIndex = buildExtIndex(config);
-  const entries = await buildPlan({
-    sourceFiles,
-    duplicates,
-    destDir,
-    extIndex,
-    fallbackCategory: config.fallbackCategory,
-  });
-
-  printPlan(entries, { destDir, fallbackCategory: config.fallbackCategory });
+  printPlan(entries, { destDir, fallbackCategory: config.fallbackCategory, counts });
 
   if (flags["dry-run"]) {
     console.log(styleText("dim", "dry-run 模式，未移动任何文件。"));
@@ -121,10 +142,24 @@ async function main() {
   }
 
   const { moved, manifestPath } = executePlan(entries, { destDir, sourceDir, formatDupBlock: zhDupBlock });
-  const dupCount = moved.filter((e) => e.action === "duplicate").length;
-  console.log(styleText("green", `完成：归档 ${moved.length - dupCount} 个，隔离重复 ${dupCount} 个。`));
-  if (dupCount) console.log(`重复文件详情见 ${path.join(destDir, "Duplicates", "manifest.md")}`);
+  const done = tally(moved);
+  console.log(
+    styleText("green", `完成：归档 ${done.archive} 个，隔离重复 ${done.duplicate} 个，挑出待查 ${done.review} 个。`),
+  );
+  const firstDup = moved.find((e) => e.action === "duplicate");
+  if (firstDup) console.log(`重复文件详情见 ${path.join(path.dirname(firstDup.to), "manifest.md")}`);
   console.log(styleText("dim", `本次记录: ${manifestPath}（可用 tidy undo 撤销）`));
+}
+
+function tally(entries) {
+  const counts = { archive: 0, duplicate: 0, review: 0 };
+  for (const e of entries) counts[e.action]++;
+  return counts;
+}
+
+function reportPhase(phase, info = {}) {
+  const text = PHASE_TEXT[phase]?.(info);
+  if (text) console.log(styleText("dim", text));
 }
 
 // ---------- 中文文案（core 只返回数据和错误码，措辞都在这里） ----------
@@ -150,13 +185,14 @@ function zhDupBlock(dups) {
   return lines.join("\n") + "\n";
 }
 
-function printPlan(entries, { destDir, fallbackCategory }) {
+function printPlan(entries, { destDir, fallbackCategory, counts }) {
   const archives = entries.filter((e) => e.action === "archive");
   const dups = entries.filter((e) => e.action === "duplicate");
+  const reviews = entries.filter((e) => e.action === "review");
 
   const byBucket = new Map();
   for (const e of archives) {
-    const bucket = `${e.category}/${e.yearMonth}`;
+    const bucket = bucketLabel(e, destDir);
     if (!byBucket.has(bucket)) byBucket.set(bucket, []);
     byBucket.get(bucket).push(e);
   }
@@ -164,23 +200,59 @@ function printPlan(entries, { destDir, fallbackCategory }) {
   console.log(styleText("bold", `\n整理计划（目标：${destDir}）\n`));
   for (const bucket of [...byBucket.keys()].sort()) {
     const items = byBucket.get(bucket);
-    const isFallback = bucket.startsWith(`${fallbackCategory}/`);
-    const label = isFallback ? styleText("yellow", bucket) : styleText("cyan", bucket);
-    console.log(`  ${label}  (${items.length} 个)`);
+    const isFallback = bucket.split(path.sep)[0].endsWith(fallbackCategory);
+    console.log(`  ${styleText(isFallback ? "yellow" : "cyan", bucket)}  (${items.length} 个)`);
     for (const e of items) {
-      const dateTag = e.dateSource === "exif" ? styleText("green", "EXIF") : "文件日期";
-      console.log(`    ${e.name}  ${styleText("dim", `[${formatSize(e.size)}, ${dateTag}]`)}`);
+      console.log(`    ${e.name}  ${styleText("dim", `[${formatSize(e.size)}${dateTag(e)}]`)}`);
+      for (const note of hints(e)) console.log(`      ${styleText("dim", note)}`);
     }
   }
 
   if (dups.length) {
-    console.log(`\n  ${styleText("magenta", `Duplicates（${dups.length} 个重复文件，移入隔离区）`)}`);
+    console.log(`\n  ${styleText("magenta", `重复文件（${dups.length} 个，内容完全相同，移入隔离区）`)}`);
     for (const e of dups) {
       console.log(`    ${e.name}  ${styleText("dim", `↳ 与之相同: ${e.keeperPath}`)}`);
     }
   }
 
-  console.log(styleText("bold", `\n共 ${entries.length} 个文件：归档 ${archives.length} 个，重复 ${dups.length} 个\n`));
+  if (reviews.length) {
+    console.log(`\n  ${styleText("red", `待查文件（${reviews.length} 个，移入待查区，不会删）`)}`);
+    for (const e of reviews) {
+      const why = ISSUE_TEXT[e.issue] ?? e.issue;
+      const detail = e.issue === "corrupt" ? `（声称是 .${e.issueDetail}）` : "";
+      console.log(`    ${e.name}  ${styleText("dim", `↳ ${why}${detail}`)}`);
+    }
+  }
+
+  const parts = [`归档 ${archives.length} 个`, `重复 ${dups.length} 个`, `待查 ${reviews.length} 个`];
+  console.log(styleText("bold", `\n共 ${entries.length} 个文件：${parts.join("，")}`));
+  if (counts?.similar || counts?.perceptual) {
+    const marks = [];
+    if (counts.similar) marks.push(`${counts.similar} 个疑似重复`);
+    if (counts.perceptual) marks.push(`${counts.perceptual} 个相似图片`);
+    console.log(styleText("dim", `另有 ${marks.join("、")}（已标注，仍照常归档，请自行判断）`));
+  }
+  console.log("");
+}
+
+function dateTag(entry) {
+  if (!entry.dateBucket) return "";
+  return entry.dateSource === "exif" ? `, ${styleText("green", "EXIF")}` : ", 文件日期";
+}
+
+/** Advisory annotations — these never changed where the file goes. */
+function hints(entry) {
+  const out = [];
+  if (entry.similar) {
+    const what = SIMILAR_TEXT[entry.similar.reason] ?? entry.similar.reason;
+    const peers = entry.similar.peers.map((p) => path.basename(p)).join("、");
+    out.push(`↳ ${what}：${peers}${entry.similar.best ? "（这份看着更完整）" : ""}`);
+  }
+  if (entry.perceptual) {
+    const peers = entry.perceptual.peers.map((p) => path.basename(p)).join("、");
+    out.push(`↳ 画面几乎相同：${peers}${entry.perceptual.best ? "（这份分辨率/体积最大）" : ""}`);
+  }
+  return out;
 }
 
 const UNDO_FAILURE_TEXT = { missing: "归档后的文件已不在原位", occupied: "原位置已有同名文件" };
@@ -194,7 +266,9 @@ function reportUndo(result, destDir) {
   if (!failures.length) {
     console.log(styleText("green", `已撤销 ${time} 的整理：${restored} 个文件移回 ${sourceDir}`));
   } else {
-    console.log(styleText("yellow", `部分撤销：${restored} 个成功，${failures.length} 个失败（清单保留，未标记为已撤销）：`));
+    console.log(
+      styleText("yellow", `部分撤销：${restored} 个成功，${failures.length} 个失败（清单保留，未标记为已撤销）：`),
+    );
     for (const f of failures) {
       console.log(`  ${f.to} → ${f.from}：${UNDO_FAILURE_TEXT[f.code] ?? f.message ?? f.code}`);
     }
@@ -203,7 +277,10 @@ function reportUndo(result, destDir) {
     console.log(
       styleText(
         "dim",
-        `已清理 ${removedDirs.length} 个空目录：${removedDirs.map((d) => path.relative(destDir, d)).sort().join("、")}`,
+        `已清理 ${removedDirs.length} 个空目录：${removedDirs
+          .map((d) => path.relative(destDir, d))
+          .sort()
+          .join("、")}`,
       ),
     );
   }
