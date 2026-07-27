@@ -10,11 +10,13 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test test/core.test.js && node scripts/sync.js --check",
+    "test": "node --test test/core.test.js test/smart.test.js && node scripts/sync.js --check",
     "sync": "node scripts/sync.js",
     "sync:fork": "node scripts/sync.js --fork"
   },
   "dependencies": {
-    "exifr": "^7.1.3"
+    "exifr": "^7.1.3",
+    "jpeg-js": "^0.4.4",
+    "pngjs": "^7.0.0"
   }
 }

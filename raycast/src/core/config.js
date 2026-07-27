@@ -39,11 +39,82 @@ const DEFAULT_CONFIG = {
       "numbers",
       "key",
       "epub",
+      "mobi",
+      "azw3",
+      "azw",
     ],
     Archives: ["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "dmg", "iso"],
+    Fonts: ["ttf", "otf", "ttc", "woff", "woff2", "eot"],
   },
   fallbackCategory: "Others",
+
+  // Prefix on every folder tidy creates ("ft_" = file-tidy), so its output is
+  // visually distinct from folders the user made by hand. "" = old naming.
+  folderPrefix: "ft_",
+
+  /**
+   * Date bucket depth per category: "month" | "year" | "none".
+   * Photos and videos carry a real capture date, so year-month is meaningful.
+   * Fonts, installers and ebooks only carry a download date — bucketing those
+   * by month scatters one logical set across a dozen folders for no reason.
+   */
+  granularity: {
+    Images: "month",
+    Videos: "month",
+    Documents: "year",
+    Audios: "none",
+    Archives: "none",
+    Fonts: "none",
+    Others: "none",
+  },
+
+  /**
+   * Optional second level inside a category, matched top-down on the file name
+   * (and extension). First rule that matches wins; no match = no subfolder.
+   * `match` entries are case-insensitive regex sources; `exts` are extensions.
+   */
+  subCategories: {
+    Images: [
+      {
+        name: "Screenshots",
+        match: ["screen ?shot", "screen ?capture", "截屏", "屏幕快照", "屏幕截图", "snipaste", "cleanshot"],
+      },
+      { name: "Screencasts", match: ["screen ?record", "screencast", "录屏", "屏幕录制"] },
+      { name: "Wallpapers", match: ["wallpaper", "壁纸"] },
+    ],
+    Videos: [{ name: "Screencasts", match: ["screen ?record", "screencast", "录屏", "屏幕录制"] }],
+    Documents: [
+      { name: "Ebooks", exts: ["epub", "mobi", "azw3", "azw"] },
+      { name: "Invoices", match: ["invoice", "receipt", "发票", "账单", "回执"] },
+      { name: "Contracts", match: ["contract", "agreement", "\\bnda\\b", "合同", "协议", "授权书"] },
+      { name: "Resumes", match: ["resume", "\\bcv\\b", "简历"] },
+      { name: "Papers", match: ["thesis", "dissertation", "论文", "开题", "文献"] },
+      { name: "Spreadsheets", exts: ["xls", "xlsx", "csv", "numbers"] },
+      { name: "Slides", exts: ["ppt", "pptx", "key"] },
+    ],
+    Archives: [{ name: "Installers", exts: ["dmg", "pkg", "exe", "msi", "iso", "apk", "deb", "rpm"] }],
+  },
+
+  /** Extra passes beyond byte-level dedup. All are advisory unless noted. */
+  detect: {
+    /** Same-content-different-encoding candidates: normalized names, same stem
+     *  across formats, version-numbered releases. Flagged in the plan only. */
+    similar: true,
+    /** Zero-byte files, extension/magic-number mismatches, OS junk.
+     *  Junk and broken files are moved to the review folder. */
+    health: true,
+    /** Visually near-identical images (bursts, re-exports, re-compressions).
+     *  Flagged in the plan only. Needs image decoding — see phash.js. */
+    perceptual: true,
+  },
+
+  /** Hamming distance under which two image hashes count as near-identical. */
+  perceptualThreshold: 5,
 };
+
+/** Folders tidy creates itself (before the prefix is applied). */
+export const DUPLICATES_DIR = "Duplicates";
+export const REVIEW_DIR = "Review";
 
 export function expandTilde(p) {
   if (p === "~") return os.homedir();
@@ -103,8 +174,59 @@ export function loadConfig() {
     ...raw,
     _path: CONFIG_PATH,
   };
+  // Whole-map settings: a user-supplied value replaces the default outright,
+  // so removing a category/rule in the config actually removes it.
   if (raw.categories) config.categories = raw.categories;
+  if (raw.subCategories) config.subCategories = raw.subCategories;
+  // Keyed switches: merge, so writing one key doesn't silently reset the rest.
+  config.granularity = { ...DEFAULT_CONFIG.granularity, ...raw.granularity };
+  config.detect = { ...DEFAULT_CONFIG.detect, ...raw.detect };
+  // Because categories replace rather than merge, a config written by an older
+  // version silently misses categories added since. Report the gap so adapters
+  // can point it out instead of quietly filing those files under Others — but
+  // never patch it in: an absent category may well be a deliberate deletion.
+  config._staleCategories = raw.categories
+    ? Object.keys(DEFAULT_CONFIG.categories).filter((c) => !(c in raw.categories))
+    : [];
   return config;
+}
+
+/**
+ * Name folders as `${folderPrefix}${base}` — but if an un-prefixed folder of
+ * that name already exists in destDir (and the prefixed one doesn't), keep
+ * using it. That way turning the prefix on doesn't split an existing archive
+ * into two parallel trees; only fresh destinations get the prefix.
+ * Returns a memoized (base) => actualName function.
+ */
+export function buildFolderNamer(destDir, config) {
+  const prefix = config.folderPrefix ?? "";
+  const cache = new Map();
+  return function folderName(base) {
+    const hit = cache.get(base);
+    if (hit !== undefined) return hit;
+    let name = prefix ? prefix + base : base;
+    if (prefix && fs.existsSync(path.join(destDir, base)) && !fs.existsSync(path.join(destDir, name))) {
+      name = base;
+    }
+    cache.set(base, name);
+    return name;
+  };
+}
+
+/**
+ * Every folder name tidy may own in destDir — both spellings, so in-place mode
+ * excludes them from the source scan and cross-run dedup can find them however
+ * they were named.
+ */
+export function organizedDirNames(config) {
+  const prefix = config.folderPrefix ?? "";
+  const bases = [...Object.keys(config.categories), config.fallbackCategory, DUPLICATES_DIR, REVIEW_DIR];
+  const names = new Set();
+  for (const b of bases) {
+    names.add(b);
+    if (prefix) names.add(prefix + b);
+  }
+  return names;
 }
 
 /** Build a lowercase extension -> category lookup table. */

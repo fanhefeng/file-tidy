@@ -47,9 +47,16 @@ export function executePlan(entries, { destDir, sourceDir, formatDupBlock = defa
 
   const dups = moved.filter((e) => e.action === "duplicate");
   if (dups.length) {
-    const manifest = path.join(destDir, "Duplicates", "manifest.md");
+    // The keeper was recorded at its pre-move location; by now it has been
+    // archived. Rewrite it to where it actually landed, otherwise the manifest
+    // points at a path that no longer exists.
+    const finalPath = new Map(moved.map((e) => [e.from, e.to]));
+    const resolved = dups.map((d) => ({ ...d, keeperPath: finalPath.get(d.keeperPath) ?? d.keeperPath }));
+    // Derive the folder from the entries rather than rebuilding the name here,
+    // so the configured prefix (and the sticky un-prefixed fallback) is honored.
+    const manifest = path.join(path.dirname(dups[0].to), "manifest.md");
     fs.mkdirSync(path.dirname(manifest), { recursive: true });
-    fs.appendFileSync(manifest, formatDupBlock(dups));
+    fs.appendFileSync(manifest, formatDupBlock(resolved));
   }
   return { moved, manifestPath };
 }
