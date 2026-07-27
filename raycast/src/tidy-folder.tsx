@@ -15,19 +15,43 @@ import {
   useNavigation,
 } from "@raycast/api";
 import fs from "node:fs";
+import path from "node:path";
 import { useState } from "react";
-import { buildExtIndex, canonicalPath, isInsideDir, loadConfig } from "./core/config.js";
-import { findDuplicates } from "./core/dedup.js";
+import { analyze, type AnalyzeCounts, type Phase } from "./core/analyze.js";
+import { canonicalPath, isInsideDir, loadConfig } from "./core/config.js";
 import { executePlan } from "./core/execute.js";
-import { buildPlan, formatSize, type PlanEntry } from "./core/plan.js";
-import { scanDest, scanSource } from "./core/scan.js";
+import { bucketLabel, formatSize, type PlanEntry } from "./core/plan.js";
 
 interface FormValues {
   source: string[];
   dest: string[];
   inPlace: boolean;
   recursive: boolean;
+  smart: boolean;
 }
+
+// ---------- English copy (core returns data and codes only) ----------
+
+const PHASE_TEXT: Partial<Record<Phase, string | ((info: { files?: number; done?: number }) => string)>> = {
+  scanning: "Scanning…",
+  dedup: ({ files }) => `Checking ${files} files for exact duplicates…`,
+  health: "Looking for broken files and OS junk…",
+  similar: "Looking for near-duplicates…",
+  perceptual: ({ files, done }) => (done ? `Comparing images (${done}/${files})…` : "Comparing images…"),
+  planning: "Building the plan…",
+};
+
+const ISSUE_TEXT: Record<string, string> = {
+  empty: "zero-byte file",
+  corrupt: "content doesn't match the extension",
+  junk: "OS junk file",
+};
+
+const SIMILAR_TEXT: Record<string, string> = {
+  versioned: "another version of the same release",
+  "normalized-name": "the same thing under a different name",
+  "same-stem": "the same name in another format",
+};
 
 export default function TidyFolderCommand() {
   const { push } = useNavigation();
@@ -61,10 +85,24 @@ export default function TidyFolderCommand() {
     const toast = await showToast({ style: Toast.Style.Animated, title: "Scanning…" });
     try {
       const config = loadConfig();
-      const organizedDirs = new Set([...Object.keys(config.categories), config.fallbackCategory, "Duplicates"]);
-      const sourceFiles = scanSource(sourceDir, {
+      if (config._staleCategories?.length) {
+        await showToast({
+          style: Toast.Style.Failure,
+          title: `Config is missing newer categories: ${config._staleCategories.join(", ")}`,
+          message: `Those files will land in ${config.fallbackCategory}. Add them in ${config._path} to enable.`,
+        });
+      }
+      if (!values.smart) config.detect = { similar: false, health: false, perceptual: false };
+      const { entries, sourceFiles, counts } = await analyze({
+        sourceDir,
+        destDir,
+        config,
         recursive: values.recursive,
-        excludeTopDirs: values.inPlace ? organizedDirs : undefined,
+        inPlace: values.inPlace,
+        onPhase: (phase: Phase, info) => {
+          const text = PHASE_TEXT[phase];
+          if (text) toast.title = typeof text === "function" ? text(info ?? {}) : text;
+        },
       });
       if (!sourceFiles.length) {
         toast.style = Toast.Style.Failure;
@@ -72,17 +110,8 @@ export default function TidyFolderCommand() {
         toast.message = "Hidden files and subfolders are skipped; enable “Include subfolders” to recurse";
         return;
       }
-      const destFiles = scanDest(destDir, values.inPlace ? { onlyDirs: organizedDirs } : undefined);
-      const duplicates = await findDuplicates(sourceFiles, destFiles);
-      const entries = await buildPlan({
-        sourceFiles,
-        duplicates,
-        destDir,
-        extIndex: buildExtIndex(config),
-        fallbackCategory: config.fallbackCategory,
-      });
       await toast.hide();
-      push(<PlanView entries={entries} sourceDir={sourceDir} destDir={destDir} />);
+      push(<PlanView entries={entries} counts={counts} sourceDir={sourceDir} destDir={destDir} />);
     } catch (err) {
       toast.style = Toast.Style.Failure;
       toast.title = "Scan failed";
@@ -133,18 +162,35 @@ export default function TidyFolderCommand() {
         />
       )}
       <Form.Checkbox id="recursive" label="Include subfolders" defaultValue={false} />
+      <Form.Checkbox
+        id="smart"
+        label="Smart checks (near-duplicates, broken files, visually similar images)"
+        defaultValue={true}
+        info="Near-duplicates and similar images are only flagged in the plan — they're still archived normally. Broken files and OS junk are moved to a review folder."
+      />
       <Form.Description text="You'll see the full plan first — nothing moves until you confirm." />
     </Form>
   );
 }
 
-function PlanView({ entries, sourceDir, destDir }: { entries: PlanEntry[]; sourceDir: string; destDir: string }) {
+function PlanView({
+  entries,
+  counts,
+  sourceDir,
+  destDir,
+}: {
+  entries: PlanEntry[];
+  counts: AnalyzeCounts;
+  sourceDir: string;
+  destDir: string;
+}) {
   const archives = entries.filter((e) => e.action === "archive");
   const dups = entries.filter((e) => e.action === "duplicate");
+  const reviews = entries.filter((e) => e.action === "review");
 
   const byBucket = new Map<string, PlanEntry[]>();
   for (const e of archives) {
-    const bucket = `${e.category}/${e.yearMonth}`;
+    const bucket = bucketLabel(e, destDir);
     byBucket.set(bucket, [...(byBucket.get(bucket) ?? []), e]);
   }
 
@@ -154,7 +200,8 @@ function PlanView({ entries, sourceDir, destDir }: { entries: PlanEntry[]; sourc
       title: destMissing ? "Create destination and tidy?" : "Run this tidy plan?",
       message:
         `${destMissing ? `Destination ${destDir} doesn't exist and will be created.\n` : ""}` +
-        `Archive ${archives.length} files, quarantine ${dups.length} duplicates → ${destDir}`,
+        `Archive ${archives.length} files, quarantine ${dups.length} duplicates, ` +
+        `move ${reviews.length} to review → ${destDir}`,
       primaryAction: { title: "Tidy", style: Alert.ActionStyle.Default },
     });
     if (!ok) return;
@@ -163,8 +210,11 @@ function PlanView({ entries, sourceDir, destDir }: { entries: PlanEntry[]; sourc
     try {
       const { moved } = executePlan(entries, { destDir, sourceDir });
       const dupCount = moved.filter((e) => e.action === "duplicate").length;
+      const reviewCount = moved.filter((e) => e.action === "review").length;
       toast.style = Toast.Style.Success;
-      toast.title = `Done: ${moved.length - dupCount} archived, ${dupCount} duplicates quarantined`;
+      toast.title =
+        `Done: ${moved.length - dupCount - reviewCount} archived, ` +
+        `${dupCount} duplicates, ${reviewCount} to review`;
       toast.message = "Use “Undo Last Tidy” to revert";
       toast.primaryAction = {
         title: "Open Destination",
@@ -185,37 +235,84 @@ function PlanView({ entries, sourceDir, destDir }: { entries: PlanEntry[]; sourc
     </ActionPanel>
   );
 
+  /** Advisory flags — these never changed where the file goes. */
+  function annotations(e: PlanEntry) {
+    const out: string[] = [];
+    if (e.similar) {
+      const peers = e.similar.peers.map((p) => path.basename(p)).join(", ");
+      out.push(`${SIMILAR_TEXT[e.similar.reason] ?? e.similar.reason}: ${peers}`);
+    }
+    if (e.perceptual) {
+      const peers = e.perceptual.peers.map((p) => path.basename(p)).join(", ");
+      out.push(`looks nearly identical to ${peers}`);
+    }
+    return out;
+  }
+
+  const smartSummary = [
+    counts.similar ? `${counts.similar} near-duplicate` : null,
+    counts.perceptual ? `${counts.perceptual} visually similar` : null,
+  ].filter(Boolean);
+
   return (
-    <List navigationTitle={`Tidy Plan → ${destDir} (${entries.length} files)`}>
+    <List
+      navigationTitle={`Tidy Plan → ${destDir} (${entries.length} files)`}
+      searchBarPlaceholder={
+        smartSummary.length ? `Flagged: ${smartSummary.join(", ")} — still archived normally` : "Filter files…"
+      }
+    >
       {[...byBucket.keys()].sort().map((bucket) => (
         <List.Section key={bucket} title={bucket} subtitle={`${byBucket.get(bucket)!.length} files`}>
-          {byBucket.get(bucket)!.map((e) => (
-            <List.Item
-              key={e.from}
-              title={e.name}
-              icon={Icon.Document}
-              accessories={[
-                { text: formatSize(e.size) },
-                {
-                  tag:
-                    e.dateSource === "exif"
-                      ? { value: "EXIF", color: Color.Green }
-                      : { value: "file date", color: Color.SecondaryText },
-                },
-              ]}
-              actions={executeAction}
-            />
-          ))}
+          {byBucket.get(bucket)!.map((e) => {
+            const notes = annotations(e);
+            return (
+              <List.Item
+                key={e.from}
+                title={e.name}
+                subtitle={notes.join(" · ")}
+                icon={Icon.Document}
+                accessories={[
+                  ...(notes.length ? [{ tag: { value: "flagged", color: Color.Orange } }] : []),
+                  { text: formatSize(e.size) },
+                  ...(e.dateBucket
+                    ? [
+                        {
+                          tag:
+                            e.dateSource === "exif"
+                              ? { value: "EXIF", color: Color.Green }
+                              : { value: "file date", color: Color.SecondaryText },
+                        },
+                      ]
+                    : []),
+                ]}
+                actions={executeAction}
+              />
+            );
+          })}
         </List.Section>
       ))}
       {dups.length > 0 && (
-        <List.Section title="Duplicates (quarantined)" subtitle={`${dups.length} files`}>
+        <List.Section title="Exact duplicates (quarantined)" subtitle={`${dups.length} files`}>
           {dups.map((e) => (
             <List.Item
               key={e.from}
               title={e.name}
               subtitle={`identical to ${e.keeperPath}`}
               icon={{ source: Icon.Duplicate, tintColor: Color.Magenta }}
+              accessories={[{ text: formatSize(e.size) }]}
+              actions={executeAction}
+            />
+          ))}
+        </List.Section>
+      )}
+      {reviews.length > 0 && (
+        <List.Section title="Needs review (moved, never deleted)" subtitle={`${reviews.length} files`}>
+          {reviews.map((e) => (
+            <List.Item
+              key={e.from}
+              title={e.name}
+              subtitle={ISSUE_TEXT[e.issue ?? ""] + (e.issue === "corrupt" ? ` (claims to be .${e.issueDetail})` : "")}
+              icon={{ source: Icon.ExclamationMark, tintColor: Color.Red }}
               accessories={[{ text: formatSize(e.size) }]}
               actions={executeAction}
             />
