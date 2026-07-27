@@ -34,8 +34,16 @@ export function executePlan(entries, { destDir, sourceDir, formatDupBlock = defa
     fs.renameSync(tmp, manifestPath);
   };
 
+  // The dup manifest's path is fixed before anything moves, so a duplicate
+  // that is itself named "manifest.md" gets a " (n)" suffix instead of landing
+  // on the reserved name and having dedup records appended into it.
+  // The folder is derived from the entries rather than rebuilt here, so the
+  // configured prefix (and the sticky un-prefixed fallback) is honored.
+  const dupEntries = entries.filter((e) => e.action === "duplicate");
+  const dupManifest = dupEntries.length ? path.join(path.dirname(dupEntries[0].to), "manifest.md") : null;
+
   for (const entry of entries) {
-    const finalTo = resolveCollision(entry.to);
+    const finalTo = resolveCollision(entry.to, dupManifest);
     fs.mkdirSync(path.dirname(finalTo), { recursive: true });
     // Record the move before performing it, so a move can never happen without
     // a manifest entry. Undo treats a recorded-but-never-performed move (file
@@ -52,11 +60,8 @@ export function executePlan(entries, { destDir, sourceDir, formatDupBlock = defa
     // points at a path that no longer exists.
     const finalPath = new Map(moved.map((e) => [e.from, e.to]));
     const resolved = dups.map((d) => ({ ...d, keeperPath: finalPath.get(d.keeperPath) ?? d.keeperPath }));
-    // Derive the folder from the entries rather than rebuilding the name here,
-    // so the configured prefix (and the sticky un-prefixed fallback) is honored.
-    const manifest = path.join(path.dirname(dups[0].to), "manifest.md");
-    fs.mkdirSync(path.dirname(manifest), { recursive: true });
-    fs.appendFileSync(manifest, formatDupBlock(resolved));
+    fs.mkdirSync(path.dirname(dupManifest), { recursive: true });
+    fs.appendFileSync(dupManifest, formatDupBlock(resolved));
   }
   return { moved, manifestPath };
 }
@@ -81,14 +86,14 @@ function moveFile(from, to) {
   }
 }
 
-function resolveCollision(target) {
-  if (!fs.existsSync(target)) return target;
+function resolveCollision(target, reserved = null) {
+  if (target !== reserved && !fs.existsSync(target)) return target;
   const dir = path.dirname(target);
   const ext = path.extname(target);
   const base = path.basename(target, ext);
   for (let i = 1; ; i++) {
     const candidate = path.join(dir, `${base} (${i})${ext}`);
-    if (!fs.existsSync(candidate)) return candidate;
+    if (candidate !== reserved && !fs.existsSync(candidate)) return candidate;
   }
 }
 

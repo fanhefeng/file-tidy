@@ -8,7 +8,7 @@ import { analyze } from "../src/core/analyze.js";
 import { buildFolderNamer, organizedDirNames } from "../src/core/config.js";
 import { executePlan } from "../src/core/execute.js";
 import { checkHealth } from "../src/core/health.js";
-import { clusterByHash, hashImages } from "../src/core/phash.js";
+import { clusterByHash, hashImages, loadHashCache, saveHashCache } from "../src/core/phash.js";
 import { buildSubIndex, scanSource, subClassify } from "../src/core/scan.js";
 import { findSimilar } from "../src/core/similar.js";
 
@@ -83,20 +83,37 @@ test("前缀：folderPrefix 为空时行为与旧版一致", () => {
   assert.equal(name("Images"), "Images");
 });
 
-test("organizedDirNames 同时包含带前缀与不带前缀两种写法", () => {
+test("organizedDirNames：旧名字含两种写法，0.5.0 新增名字只认带前缀的", () => {
   const names = organizedDirNames(cfg());
-  for (const n of [
-    "Images",
-    "ft_Images",
-    "Duplicates",
-    "ft_Duplicates",
-    "Review",
-    "ft_Review",
-    "Others",
-    "ft_Others",
-  ]) {
+  for (const n of ["Images", "ft_Images", "Duplicates", "ft_Duplicates", "ft_Review", "Others", "ft_Others"]) {
     assert.ok(names.has(n), `缺少 ${n}`);
   }
+  // Review 是 0.5.0 才有的名字，无前缀写法只可能是用户自己的目录
+  assert.ok(!names.has("Review"));
+});
+
+test("前缀沿用：不吞用户自己的 Review 目录（0.5.0 新增名字无旧档可沿用）", () => {
+  const dest = tmp();
+  fs.mkdirSync(path.join(dest, "Review"));
+  const name = buildFolderNamer(dest, cfg());
+  assert.equal(name("Review"), "ft_Review");
+});
+
+test("前缀沿用：目标下同名的是普通文件时不沿用，避免执行阶段 ENOTDIR", () => {
+  const dest = tmp();
+  write(dest, "Images", "just a file named Images");
+  const name = buildFolderNamer(dest, cfg());
+  assert.equal(name("Images"), "ft_Images");
+});
+
+test("改 folderPrefix 后，旧前缀的隔离区仍被跳过、不充当去重 keeper", async () => {
+  const src = tmp();
+  const dest = tmp();
+  write(dest, path.join("ft_Duplicates", "old.jpg"), "SHARED");
+  write(src, "new.jpg", "SHARED");
+
+  const { entries } = await analyze({ sourceDir: src, destDir: dest, config: cfg({ folderPrefix: "" }) });
+  assert.equal(entries[0].action, "archive");
 });
 
 test("旧配置缺少新版类别时被标记出来，但不会被自动补进去", async () => {
@@ -291,6 +308,42 @@ test("健康检查关闭时，.DS_Store 不进扫描范围", async () => {
   assert.equal(entries[0].name, "ok.txt");
 });
 
+test("健康检查先于去重：字节相同的垃圾文件都进 Review，不再互相判重", async () => {
+  const src = tmp();
+  const dest = tmp();
+  write(src, path.join("sub1", ".DS_Store"), "same junk bytes");
+  write(src, path.join("sub2", ".DS_Store"), "same junk bytes");
+
+  const { counts } = await analyze({
+    sourceDir: src,
+    destDir: dest,
+    recursive: true,
+    config: cfg({ detect: { similar: false, health: true, perceptual: false } }),
+  });
+  assert.equal(counts.review, 2);
+  assert.equal(counts.duplicate, 0);
+});
+
+test("健康检查：合法的裸帧 MP3 / mdat 开头的 MOV / AIFC 不再误判 corrupt", () => {
+  const dir = tmp();
+  const mp3 = write(dir, "bare.mp3", Buffer.from([0xff, 0xfa, 0x90, 0x00, 0x11, 0x22, 0x33, 0x44]));
+  const mov = write(dir, "old.mov", Buffer.concat([Buffer.from([0, 0, 0, 8]), Buffer.from("mdat12345678")]));
+  const aifc = write(dir, "c.aiff", Buffer.from("FORM\x00\x00\x00\x20AIFCrest-of-file"));
+  const fake = write(dir, "fake.mp3", "definitely text");
+
+  const files = [mp3, mov, aifc, fake].map((p) => ({
+    path: p,
+    name: path.basename(p),
+    ext: path.extname(p).slice(1).toLowerCase(),
+    size: fs.statSync(p).size,
+  }));
+  const issues = checkHealth(files);
+  assert.equal(issues.has(mp3), false);
+  assert.equal(issues.has(mov), false);
+  assert.equal(issues.has(aifc), false);
+  assert.equal(issues.get(fake).issue, "corrupt");
+});
+
 test("scanSource 默认不收隐藏文件，includeJunk 只额外收已知垃圾名", () => {
   const src = tmp();
   write(src, ".DS_Store", "junk");
@@ -376,6 +429,61 @@ test("感知哈希：只标注不改归档去向", async () => {
   });
   assert.equal(counts.perceptual, 2);
   assert.ok(entries.every((e) => e.action === "archive"));
+});
+
+test("感知哈希：缓存按 path+size+mtime 命中，落盘后可读回", async () => {
+  const dir = tmp();
+  const p = makeJpeg(dir, "a.jpg", {});
+  const stat = fs.statSync(p);
+  const file = { path: p, name: "a.jpg", ext: "jpg", size: stat.size, mtime: stat.mtime };
+
+  const cache = new Map();
+  const first = await hashImages([file], { cache });
+  assert.equal(cache.get(p).hash, first.get(p));
+
+  saveHashCache(dir, cache, [file]);
+  const loaded = loadHashCache(dir);
+  assert.equal(loaded.get(p).hash, first.get(p));
+
+  // 真命中：换成同尺寸的不可解码内容并还原 mtime——仍返回缓存哈希，说明没有重新解码
+  const stat2 = fs.statSync(p);
+  fs.writeFileSync(p, Buffer.alloc(stat.size, 1));
+  fs.utimesSync(p, stat2.atime, stat.mtime);
+  const again = await hashImages([file], { cache: loaded });
+  assert.equal(again.get(p), first.get(p));
+});
+
+test("感知哈希：源批次没有可哈希图片时整个 pass 被跳过", async () => {
+  const src = tmp();
+  const dest = tmp();
+  write(src, "doc.txt", "no images here");
+  makeJpeg(dest, path.join("ft_Images", "archived.jpg"), {});
+
+  const phases = [];
+  await analyze({
+    sourceDir: src,
+    destDir: dest,
+    config: cfg({ detect: { similar: false, health: false, perceptual: true } }),
+    onPhase: (phase) => phases.push(phase),
+  });
+  assert.ok(!phases.includes("perceptual"));
+});
+
+test("重复文件恰好名为 manifest.md 时让位，去重清单不被污染", async () => {
+  const src = tmp();
+  const dest = tmp();
+  write(src, "notes.txt", "SAMEBYTES");
+  write(src, "manifest.md", "SAMEBYTES");
+
+  const config = cfg({ detect: { similar: false, health: false, perceptual: false } });
+  const { entries } = await analyze({ sourceDir: src, destDir: dest, config });
+  executePlan(entries, { destDir: dest, sourceDir: src });
+
+  const dupDir = path.join(dest, "ft_Duplicates");
+  // 用户的文件带后缀落位，内容原封不动
+  assert.equal(fs.readFileSync(path.join(dupDir, "manifest (1).md"), "utf8"), "SAMEBYTES");
+  // 清单本体只有去重记录
+  assert.ok(!fs.readFileSync(path.join(dupDir, "manifest.md"), "utf8").includes("SAMEBYTES"));
 });
 
 // ---------- 端到端 ----------

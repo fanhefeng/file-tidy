@@ -26,6 +26,7 @@ export function loadConfig(): TidyConfig;
 export function buildExtIndex(config: TidyConfig): Map<string, string>;
 export function buildFolderNamer(destDir: string, config: TidyConfig): (base: string) => string;
 export function organizedDirNames(config: TidyConfig): Set<string>;
+export function quarantineDirNames(config: TidyConfig): Set<string>;
 export function expandTilde(p: string): string;
 export function canonicalPath(p: string): string;
 export function isInsideDir(parent: string, child: string): boolean;

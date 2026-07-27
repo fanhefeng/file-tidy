@@ -27,7 +27,8 @@ function write(dir, rel, content) {
 
 async function plan(sourceDir, destDir, scanOpts = {}) {
   const sourceFiles = scanSource(sourceDir, scanOpts);
-  const duplicates = await findDuplicates(sourceFiles, scanDest(destDir));
+  const destFiles = scanDest(destDir, { skipDirs: new Set([".tidy", "Duplicates", "Review"]) });
+  const duplicates = await findDuplicates(sourceFiles, destFiles);
   return buildPlan({ sourceFiles, duplicates, destDir, extIndex, fallbackCategory: "Others" });
 }
 

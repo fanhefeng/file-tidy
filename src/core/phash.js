@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import exifr from "exifr";
 import jpeg from "jpeg-js";
 import { PNG } from "pngjs";
@@ -32,18 +33,60 @@ export function isHashableImage(file) {
 
 /**
  * Hash every hashable image. Returns Map<path, bigint>; files that couldn't be
- * decoded are simply absent.
+ * decoded are simply absent. `cache` (see loadHashCache) short-circuits files
+ * whose size and mtime are unchanged — including remembered decode failures —
+ * and is updated in place with everything hashed this run.
  */
-export async function hashImages(files, { onProgress } = {}) {
+export async function hashImages(files, { onProgress, cache } = {}) {
   const hashes = new Map();
   let done = 0;
   for (const file of files) {
     if (!isHashableImage(file)) continue;
-    const hash = await hashImage(file);
+    const cached = cache?.get(file.path);
+    const fresh = cached && cached.size === file.size && cached.mtimeMs === file.mtime?.getTime();
+    const hash = fresh ? cached.hash : await hashImage(file);
+    if (!fresh) cache?.set(file.path, { size: file.size, mtimeMs: file.mtime?.getTime() ?? 0, hash });
     if (hash !== null) hashes.set(file.path, hash);
     onProgress?.(++done);
   }
   return hashes;
+}
+
+const CACHE_REL = [".tidy", "phash-cache.json"];
+
+/**
+ * Hash cache persisted under destDir/.tidy — decode cost otherwise grows with
+ * the archive on every run. Best-effort on both ends: an unreadable or corrupt
+ * cache is just an empty one.
+ */
+export function loadHashCache(destDir) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(destDir, ...CACHE_REL), "utf8"));
+    return new Map(
+      Object.entries(raw.entries ?? {}).map(([p, e]) => [
+        p,
+        { size: e.size, mtimeMs: e.mtimeMs, hash: e.hash === null ? null : BigInt(`0x${e.hash}`) },
+      ]),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+/** Persist the cache, keeping only entries for `files` — moved/deleted paths drop out. */
+export function saveHashCache(destDir, cache, files) {
+  const keep = new Set(files.map((f) => f.path));
+  const entries = {};
+  for (const [p, e] of cache) {
+    if (keep.has(p)) entries[p] = { size: e.size, mtimeMs: e.mtimeMs, hash: e.hash === null ? null : e.hash.toString(16) };
+  }
+  try {
+    const file = path.join(destDir, ...CACHE_REL);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ entries }));
+  } catch {
+    // Cache is an optimization only — never let it fail a run.
+  }
 }
 
 async function hashImage(file) {

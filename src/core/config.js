@@ -116,6 +116,13 @@ const DEFAULT_CONFIG = {
 export const DUPLICATES_DIR = "Duplicates";
 export const REVIEW_DIR = "Review";
 
+/**
+ * Base names introduced together with (or after) the folder prefix — 0.4.0
+ * never created an un-prefixed folder of these names, so an existing one in
+ * destDir is the user's own and must never be adopted as tidy territory.
+ */
+const POST_PREFIX_BASES = new Set([REVIEW_DIR, "Fonts"]);
+
 export function expandTilde(p) {
   if (p === "~") return os.homedir();
   if (p.startsWith("~/") || (process.platform === "win32" && p.startsWith("~\\"))) {
@@ -196,6 +203,8 @@ export function loadConfig() {
  * that name already exists in destDir (and the prefixed one doesn't), keep
  * using it. That way turning the prefix on doesn't split an existing archive
  * into two parallel trees; only fresh destinations get the prefix.
+ * Adoption is limited to names 0.4.0 could actually have created: a name from
+ * POST_PREFIX_BASES that exists un-prefixed can only be the user's own folder.
  * Returns a memoized (base) => actualName function.
  */
 export function buildFolderNamer(destDir, config) {
@@ -205,7 +214,12 @@ export function buildFolderNamer(destDir, config) {
     const hit = cache.get(base);
     if (hit !== undefined) return hit;
     let name = prefix ? prefix + base : base;
-    if (prefix && fs.existsSync(path.join(destDir, base)) && !fs.existsSync(path.join(destDir, name))) {
+    if (
+      prefix &&
+      !POST_PREFIX_BASES.has(base) &&
+      isDir(path.join(destDir, base)) &&
+      !fs.existsSync(path.join(destDir, name))
+    ) {
       name = base;
     }
     cache.set(base, name);
@@ -213,18 +227,48 @@ export function buildFolderNamer(destDir, config) {
   };
 }
 
+/** existsSync alone would also match a plain file, whose adoption later dies in mkdir with ENOTDIR. */
+function isDir(p) {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Every folder name tidy may own in destDir — both spellings, so in-place mode
- * excludes them from the source scan and cross-run dedup can find them however
- * they were named.
+ * Every folder name tidy may own in destDir, in every spelling it may carry on
+ * disk: current prefix, the default prefix (in case the user changed prefixes
+ * between runs), and — for names that predate the prefix — un-prefixed. Used
+ * so in-place mode excludes them from the source scan and cross-run dedup can
+ * find them however they were named.
  */
 export function organizedDirNames(config) {
   const prefix = config.folderPrefix ?? "";
   const bases = [...Object.keys(config.categories), config.fallbackCategory, DUPLICATES_DIR, REVIEW_DIR];
   const names = new Set();
   for (const b of bases) {
+    if (!prefix || !POST_PREFIX_BASES.has(b)) names.add(b);
+    names.add(prefix + b);
+    names.add(DEFAULT_CONFIG.folderPrefix + b);
+  }
+  return names;
+}
+
+/**
+ * Every spelling the quarantine folders may carry on disk. Rejected copies in
+ * them must never re-enter a scan (as dedup keepers or archived content), no
+ * matter which prefix was configured when they were created. Prefixes other
+ * than the current and default ones aren't tracked — changing to a custom
+ * prefix and back is on the user.
+ */
+export function quarantineDirNames(config) {
+  const prefix = config.folderPrefix ?? "";
+  const names = new Set();
+  for (const b of [DUPLICATES_DIR, REVIEW_DIR]) {
     names.add(b);
-    if (prefix) names.add(prefix + b);
+    names.add(prefix + b);
+    names.add(DEFAULT_CONFIG.folderPrefix + b);
   }
   return names;
 }

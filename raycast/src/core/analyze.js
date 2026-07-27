@@ -1,7 +1,7 @@
-import { DUPLICATES_DIR, REVIEW_DIR, buildExtIndex, buildFolderNamer, organizedDirNames } from "./config.js";
+import { buildExtIndex, buildFolderNamer, organizedDirNames, quarantineDirNames } from "./config.js";
 import { findDuplicates } from "./dedup.js";
 import { checkHealth } from "./health.js";
-import { clusterByHash, hashImages, isHashableImage } from "./phash.js";
+import { clusterByHash, hashImages, isHashableImage, loadHashCache, saveHashCache } from "./phash.js";
 import { buildPlan } from "./plan.js";
 import { buildSubIndex, scanDest, scanSource } from "./scan.js";
 import { findSimilar } from "./similar.js";
@@ -30,27 +30,29 @@ export async function analyze({ sourceDir, destDir, config, recursive = false, i
     return { entries: [], sourceFiles, organizedDirs, counts: emptyCounts() };
   }
 
-  // Quarantine folders hold rejected copies — they must never act as keepers
-  // for dedup, nor be rescanned as archived content.
-  const quarantine = [DUPLICATES_DIR, REVIEW_DIR].flatMap((base) => [base, (config.folderPrefix ?? "") + base]);
-  const destFiles = scanDest(destDir, {
-    onlyDirs: inPlace ? organizedDirs : undefined,
-    skipDirs: new Set([".tidy", ...quarantine]),
-  });
-
-  onPhase("dedup", { files: sourceFiles.length });
-  const duplicates = await findDuplicates(sourceFiles, destFiles);
-
-  // Files already headed for quarantine don't need further judgement.
-  const remaining = sourceFiles.filter((f) => !duplicates.has(f.path));
-
+  // Health first: junk and broken files are headed for review anyway, and they
+  // must not participate in dedup — a byte-identical junk pair would otherwise
+  // get one copy quarantined as a "duplicate" whose keeper lives in Review.
+  // (It's also the cheaper pass: 16 bytes per file vs hashing.)
   let health = new Map();
   if (detect.health !== false) {
-    onPhase("health", { files: remaining.length });
-    health = checkHealth(remaining);
+    onPhase("health", { files: sourceFiles.length });
+    health = checkHealth(sourceFiles);
   }
+  const sound = sourceFiles.filter((f) => !health.has(f.path));
 
-  const healthy = remaining.filter((f) => !health.has(f.path));
+  // Quarantine folders hold rejected copies — they must never act as keepers
+  // for dedup, nor be rescanned as archived content, whichever prefix they
+  // were created under.
+  const destFiles = scanDest(destDir, {
+    onlyDirs: inPlace ? organizedDirs : undefined,
+    skipDirs: new Set([".tidy", ...quarantineDirNames(config)]),
+  });
+
+  onPhase("dedup", { files: sound.length });
+  const duplicates = await findDuplicates(sound, destFiles);
+
+  const healthy = sound.filter((f) => !duplicates.has(f.path));
 
   const sourcePaths = new Set(healthy.map((f) => f.path));
 
@@ -67,12 +69,20 @@ export async function analyze({ sourceDir, destDir, config, recursive = false, i
   }
 
   let perceptual = new Map();
-  if (detect.perceptual !== false) {
-    const images = [...healthy, ...destFiles].filter(isHashableImage);
+  // Without a hashable source image the pass could only flag archive-vs-archive
+  // pairs, all of which get filtered out below — skip the decoding entirely.
+  const sourceImages = detect.perceptual !== false ? healthy.filter(isHashableImage) : [];
+  if (sourceImages.length) {
+    const images = [...sourceImages, ...destFiles.filter(isHashableImage)];
     onPhase("perceptual", { files: images.length });
+    // The cache spares re-decoding the whole archive on every run — decode cost
+    // would otherwise grow with the archive, not with the batch being tidied.
+    const cache = loadHashCache(destDir);
     const hashes = await hashImages(images, {
+      cache,
       onProgress: (done) => onPhase("perceptual", { files: images.length, done }),
     });
+    saveHashCache(destDir, cache, images);
     if (hashes.size > 1) {
       const byPath = new Map(images.map((f) => [f.path, f]));
       perceptual = clusterByHash(hashes, byPath, config.perceptualThreshold ?? 5);

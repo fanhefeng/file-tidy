@@ -41,8 +41,11 @@ function walk(dir, out, recursive, excludeDirs, includeJunk) {
 }
 
 /**
- * Recursively list already-archived files in destDir (for cross-run dedup),
- * excluding the .tidy bookkeeping dir and the Duplicates quarantine.
+ * Recursively list already-archived files in destDir (for cross-run dedup).
+ * skipDirs: top-level dir names to exclude — callers MUST pass every
+ * quarantine spelling (see quarantineDirNames in config.js), or rejected
+ * copies get rescanned as archived content; only dot-dirs are skipped
+ * unconditionally.
  * onlyDirs: restrict to these top-level dirs and ignore loose files —
  * in-place mode uses this so unorganized source files aren't counted as
  * already archived (they'd otherwise dedup against themselves).
@@ -50,7 +53,7 @@ function walk(dir, out, recursive, excludeDirs, includeJunk) {
 export function scanDest(destDir, { onlyDirs, skipDirs } = {}) {
   const files = [];
   if (!fs.existsSync(destDir)) return files;
-  const skip = skipDirs ?? new Set([".tidy", "Duplicates"]);
+  const skip = skipDirs ?? new Set();
   for (const entry of fs.readdirSync(destDir, { withFileTypes: true })) {
     if (entry.name.startsWith(".") || skip.has(entry.name)) continue;
     const full = path.join(destDir, entry.name);

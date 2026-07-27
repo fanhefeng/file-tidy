@@ -85,13 +85,6 @@ export default function TidyFolderCommand() {
     const toast = await showToast({ style: Toast.Style.Animated, title: "Scanning…" });
     try {
       const config = loadConfig();
-      if (config._staleCategories?.length) {
-        await showToast({
-          style: Toast.Style.Failure,
-          title: `Config is missing newer categories: ${config._staleCategories.join(", ")}`,
-          message: `Those files will land in ${config.fallbackCategory}. Add them in ${config._path} to enable.`,
-        });
-      }
       if (!values.smart) config.detect = { similar: false, health: false, perceptual: false };
       const { entries, sourceFiles, counts } = await analyze({
         sourceDir,
@@ -111,6 +104,15 @@ export default function TidyFolderCommand() {
         return;
       }
       await toast.hide();
+      // Shown after the progress toast is gone — earlier it would be replaced
+      // by the first phase update within the same tick and never be seen.
+      if (config._staleCategories?.length) {
+        await showToast({
+          style: Toast.Style.Failure,
+          title: `Config is missing newer categories: ${config._staleCategories.join(", ")}`,
+          message: `Those files will land in ${config.fallbackCategory}. Add them in ${config._path} to enable.`,
+        });
+      }
       push(<PlanView entries={entries} counts={counts} sourceDir={sourceDir} destDir={destDir} />);
     } catch (err) {
       toast.style = Toast.Style.Failure;
