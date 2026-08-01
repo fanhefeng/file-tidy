@@ -59,22 +59,22 @@ tidy undo --dest ~/Archive          # 撤销上一次
 
 CLI 和 Raycast 扩展读的是同一份配置。可调的键：
 
-| 键 | 作用 |
-| --- | --- |
-| `dest` | 固定默认归档目录 |
-| `categories` | 类别 → 扩展名映射 |
-| `fallbackCategory` | 认不出扩展名时的兜底类别 |
-| `folderPrefix` | 生成目录的前缀，默认 `"ft_"`；设成 `""` 恢复旧命名 |
-| `granularity` | 每个类别的日期粒度：`"month"` / `"year"` / `"none"` |
-| `subCategories` | 二级分类规则，`match` 是正则、`exts` 是扩展名，自上而下首个命中生效 |
-| `detect` | 检测开关：`similar` / `health` / `perceptual`，或整体设为 `false` 全部关闭 |
-| `perceptualThreshold` | 图片相似度阈值（汉明距离），默认 5，调大更宽松 |
+| 键                    | 作用                                                                       |
+| --------------------- | -------------------------------------------------------------------------- |
+| `dest`                | 固定默认归档目录                                                           |
+| `categories`          | 类别 → 扩展名映射                                                          |
+| `fallbackCategory`    | 认不出扩展名时的兜底类别                                                   |
+| `folderPrefix`        | 生成目录的前缀，默认 `"ft_"`；设成 `""` 恢复旧命名                         |
+| `granularity`         | 每个类别的日期粒度：`"month"` / `"year"` / `"none"`                        |
+| `subCategories`       | 二级分类规则，`match` 是正则、`exts` 是扩展名，自上而下首个命中生效        |
+| `detect`              | 检测开关：`similar` / `health` / `perceptual`，或整体设为 `false` 全部关闭 |
+| `perceptualThreshold` | 图片相似度阈值（汉明距离），默认 5，调大更宽松                             |
 
 `categories` 和 `subCategories` 是**整体替换**语义——这样你才能删掉不想要的类别。副作用是：升级后新增的默认类别不会自动进你已有的配置文件。检测到这种情况时会提示一行，让你自己决定加不加，工具不会擅自改你的配置。
 
 其余键是**合并**语义，只写你关心的那个即可。
 
-## 仓库结构与同步流程
+## 仓库结构
 
 ```
 src/core/        ★ 唯一真源：纯逻辑，不含面向用户文案（附 .d.ts 类型声明）
@@ -88,30 +88,30 @@ src/core/        ★ 唯一真源：纯逻辑，不含面向用户文案（附 .
   plan.js          汇总成移动计划（唯一决定目标路径的地方）
   analyze.js       编排上述各步，两个适配层共用
   execute.js       执行移动 + 运行清单
+  move.js          单个文件的移动，含跨卷复制回退
   undo.js          撤销
-bin/tidy.js      CLI 适配层：中文文案、终端交互
-raycast/src/     Raycast 适配层：英文文案、表单与列表 UI
-raycast/src/core 生成物 —— 由 sync 脚本从 src/core 原样复制，勿手改
+bin/tidy.js      CLI 适配层：终端文案与交互
+raycast/src/     Raycast 适配层：表单与列表 UI
+raycast/src/core 生成物 —— 由 sync 从 src/core 原样复制，勿手改
+raycast/tests    生成物 —— 由 sync 从 test/ 原样复制，勿手改
 scripts/sync.js  同步脚本
 test/            核心逻辑测试（node:test）
 ```
 
-新增检测请加在 `analyze.js` 的编排里、以 Map 的形式喂给 `buildPlan`；`plan.js` 是唯一决定文件去向的地方，不要在别处拼目标路径。
-
-core 只返回数据、抛带 `code` 的错误；所有"说话"（中文/英文文案）都在各自适配层。因此两份 core 字节相同，同步就是复制：
+core 只返回数据、抛带 `code` 的错误，所有"说话"都在各自适配层，因此两份 core 字节相同，同步就是复制：
 
 ```bash
-pnpm test        # 跑测试 + 校验 raycast/src/core 未漂移
-pnpm sync        # src/core → raycast/src/core
-pnpm sync:fork   # 再把 raycast/ 镜像到 fork 的 extensions/file-tidy/（commit/push 手动）
+pnpm test        # 跑测试 + 校验 raycast 副本未漂移
+pnpm sync        # src/core → raycast/src/core，test → raycast/tests
+pnpm sync:fork   # 再把 raycast/ 镜像到 Store fork
 ```
 
-### 与 Raycast Store 的关系
+分层约定、commit 规范、Raycast Store 提交流程与检查清单见 **[CONTRIBUTING.md](CONTRIBUTING.md)**。
 
-Store 要求扩展目录自包含，PR 也只能包含 `extensions/file-tidy/` 一个目录，所以扩展无法直接 import 本仓库的 core —— 这就是 `raycast/src/core/` 这份复制存在的原因。提交渠道是 `raycast/extensions` 的 fork（`fanhefeng/extensions` 分支 `ext/file-tidy`，本地检出在 `~/.config/raycast/public-extensions-fork`），对应 PR：[raycast/extensions#29437](https://github.com/raycast/extensions/pull/29437)。
+## Raycast 扩展
 
-日常改动流程：改 `src/core/` 或适配层 → `pnpm test` → `pnpm sync:fork` → 在 fork 里 commit + push，PR 自动更新。
+已上架 Raycast Store（[PR #29437](https://github.com/raycast/extensions/pull/29437)，2026-07-31 合并）。Store 要求扩展目录自包含、不能 import 目录外的文件，`raycast/src/core/` 这份复制正是为此存在。
 
 ## 更新记录
 
-见 [CHANGELOG.md](CHANGELOG.md)。`raycast/CHANGELOG.md` 是另一份，格式由 Raycast Store 规定，只记面向用户的扩展变更。
+见 [CHANGELOG.md](CHANGELOG.md)。`raycast/CHANGELOG.md` 是另一份，格式由 Raycast Store 规定，只记面向扩展用户的变更。

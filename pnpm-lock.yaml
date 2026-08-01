@@ -17,6 +17,10 @@ importers:
       pngjs:
         specifier: ^7.0.0
         version: 7.0.0
+    devDependencies:
+      prettier:
+        specifier: ^3.9.5
+        version: 3.9.6
 
 packages:
 
@@ -30,6 +34,11 @@ packages:
     resolution: {integrity: sha512-LKWqWJRhstyYo9pGvgor/ivk2w94eSjE3RGVuzLGlr3NmD8bf7RcYGze1mNdEHRP6TRP6rMuDHk5t44hnTRyow==}
     engines: {node: '>=14.19.0'}
 
+  prettier@3.9.6:
+    resolution: {integrity: sha512-OpN0zzVdiaiAhxpuuj5efpIS4sY9j7bY6uR5mnj5yPzGkdkjNKSJeUThPb60Jw29QuAZgA4o+/iB49kFiaBX6g==}
+    engines: {node: '>=14'}
+    hasBin: true
+
 snapshots:
 
   exifr@7.1.3: {}
@@ -37,3 +46,5 @@ snapshots:
   jpeg-js@0.4.4: {}
 
   pngjs@7.0.0: {}
+
+  prettier@3.9.6: {}

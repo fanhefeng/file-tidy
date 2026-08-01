@@ -1,7 +1,25 @@
 {
   "name": "file-tidy",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Organize files into prefixed category folders with byte-level dedup, near-duplicate and similar-image detection, and one-step undo",
+  "keywords": [
+    "cli",
+    "files",
+    "organize",
+    "archive",
+    "deduplication",
+    "raycast"
+  ],
+  "homepage": "https://github.com/fanhefeng/file-tidy#readme",
+  "bugs": {
+    "url": "https://github.com/fanhefeng/file-tidy/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fanhefeng/file-tidy.git"
+  },
+  "license": "MIT",
+  "author": "fhf1121",
   "type": "module",
   "bin": {
     "tidy": "bin/tidy.js"
@@ -9,8 +27,11 @@
   "engines": {
     "node": ">=20"
   },
+  "packageManager": "pnpm@11.5.1",
   "scripts": {
     "test": "node --test test/core.test.js test/smart.test.js && node scripts/sync.js --check",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "sync": "node scripts/sync.js",
     "sync:fork": "node scripts/sync.js --fork"
   },
@@ -18,5 +39,8 @@
     "exifr": "^7.1.3",
     "jpeg-js": "^0.4.4",
     "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.5"
   }
 }

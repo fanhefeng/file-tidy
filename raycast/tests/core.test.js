@@ -1,0 +1,319 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+import { buildExtIndex, canonicalPath, isInsideDir } from "../src/core/config.js";
+import { findDuplicates } from "../src/core/dedup.js";
+import { executePlan } from "../src/core/execute.js";
+import { moveFile } from "../src/core/move.js";
+import { buildPlan } from "../src/core/plan.js";
+import { scanDest, scanSource } from "../src/core/scan.js";
+import { getLastRun, undoLastRun } from "../src/core/undo.js";
+
+const extIndex = buildExtIndex({ categories: { Images: ["jpg"], Documents: ["txt"] } });
+const now = new Date();
+const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+function tmp() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "tidy-test-"));
+}
+
+function write(dir, rel, content) {
+  const p = path.join(dir, rel);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, content);
+  return p;
+}
+
+async function plan(sourceDir, destDir, scanOpts = {}) {
+  const sourceFiles = scanSource(sourceDir, scanOpts);
+  const destFiles = scanDest(destDir, { skipDirs: new Set([".tidy", "Duplicates", "Review"]) });
+  const duplicates = await findDuplicates(sourceFiles, destFiles);
+  return buildPlan({ sourceFiles, duplicates, destDir, extIndex, fallbackCategory: "Others", folderName: (b) => b });
+}
+
+test("archives into category/date buckets and writes a run manifest", async () => {
+  const src = tmp();
+  const dest = tmp();
+  write(src, "a.txt", "aaa");
+  write(src, "b.jpg", "not really a jpg");
+  write(src, "c.xyz", "zz");
+
+  const { manifestPath } = executePlan(await plan(src, dest), { destDir: dest, sourceDir: src });
+
+  assert.ok(fs.existsSync(path.join(dest, "Documents", ym, "a.txt")));
+  assert.ok(fs.existsSync(path.join(dest, "Images", ym, "b.jpg")));
+  assert.ok(fs.existsSync(path.join(dest, "Others", ym, "c.xyz")));
+  assert.ok(!fs.existsSync(path.join(src, "a.txt")));
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  assert.equal(manifest.moves.length, 3);
+  assert.equal(manifest.sourceDir, src);
+  // The write-then-rename leaves no .tmp behind
+  assert.equal(fs.readdirSync(path.dirname(manifestPath)).filter((f) => f.endsWith(".tmp")).length, 0);
+});
+
+test("quarantines a byte-identical file under another name and records it in manifest.md", async () => {
+  const src = tmp();
+  const dest = tmp();
+  write(src, "photo.jpg", "SAMEBYTES");
+  write(src, "photo copy.jpg", "SAMEBYTES");
+
+  const entries = await plan(src, dest);
+  const dup = entries.find((e) => e.action === "duplicate");
+  assert.equal(dup.name, "photo copy.jpg"); // the "copy" marker is penalised, so the plain name is kept
+  assert.ok(dup.keeperPath.endsWith("photo.jpg"));
+
+  executePlan(entries, { destDir: dest, sourceDir: src });
+  assert.ok(fs.existsSync(path.join(dest, "Images", ym, "photo.jpg")));
+  assert.ok(fs.existsSync(path.join(dest, "Duplicates", "photo copy.jpg")));
+  assert.match(fs.readFileSync(path.join(dest, "Duplicates", "manifest.md"), "utf8"), /photo copy\.jpg/);
+});
+
+test("quarantines a new file that duplicates one already archived in the destination", async () => {
+  const src = tmp();
+  const dest = tmp();
+  const kept = write(dest, `Images/${ym}/x.jpg`, "CONTENT");
+  write(src, "y.jpg", "CONTENT");
+
+  const entries = await plan(src, dest);
+  assert.equal(entries[0].action, "duplicate");
+  assert.equal(entries[0].keeperPath, kept);
+});
+
+test("undo restores every file, clears emptied folders, retires the manifest, then returns null", async () => {
+  const src = tmp();
+  const dest = tmp();
+  write(src, "a.txt", "aaa");
+  write(src, "b.jpg", "bbbb");
+  executePlan(await plan(src, dest), { destDir: dest, sourceDir: src });
+
+  const result = undoLastRun(dest);
+  assert.equal(result.retired, true);
+  assert.equal(result.restored, 2);
+  assert.equal(result.failures.length, 0);
+  assert.ok(result.removedDirs.length >= 2);
+  assert.ok(fs.existsSync(path.join(src, "a.txt")));
+  assert.ok(!fs.existsSync(path.join(dest, "Documents")));
+  assert.ok(!fs.existsSync(path.join(dest, "Images")));
+
+  assert.equal(undoLastRun(dest), null);
+});
+
+test("undo reports occupied when the original spot is taken, and keeps the manifest", async () => {
+  const src = tmp();
+  const dest = tmp();
+  write(src, "a.txt", "aaa");
+  executePlan(await plan(src, dest), { destDir: dest, sourceDir: src });
+  write(src, "a.txt", "different now");
+
+  const result = undoLastRun(dest);
+  assert.equal(result.retired, false);
+  assert.equal(result.failures[0].code, "occupied");
+  assert.ok(fs.existsSync(result.manifestPath)); // not retired, so the undo can be retried
+  assert.ok(fs.existsSync(path.join(dest, "Documents", ym, "a.txt")));
+});
+
+test("appends a ' (n)' suffix when the target name is already taken", async () => {
+  const src = tmp();
+  const dest = tmp();
+  write(src, "sub1/same.txt", "one");
+  write(src, "sub2/same.txt", "two");
+
+  executePlan(await plan(src, dest, { recursive: true }), { destDir: dest, sourceDir: src });
+  assert.ok(fs.existsSync(path.join(dest, "Documents", ym, "same.txt")));
+  assert.ok(fs.existsSync(path.join(dest, "Documents", ym, "same (1).txt")));
+});
+
+test("resolves final names in the plan, so same-named files get successive ' (n)' suffixes", async () => {
+  const dest = tmp();
+  const bucket = path.join(dest, "Documents", ym);
+  fs.mkdirSync(bucket, { recursive: true });
+  fs.writeFileSync(path.join(bucket, "report.txt"), "existing");
+  const date = new Date();
+  const sourceFiles = ["one", "two"].map((folder) => ({
+    path: path.join("/source", folder, "report.txt"),
+    name: "report.txt",
+    ext: "txt",
+    size: 1,
+    birthtime: date,
+    mtime: date,
+  }));
+
+  const entries = await buildPlan({
+    sourceFiles,
+    duplicates: new Map(),
+    destDir: dest,
+    extIndex,
+    fallbackCategory: "Others",
+    folderName: (b) => b,
+  });
+  // The plan already carries the final name, so the preview matches disk
+  assert.deepEqual(
+    entries.map((e) => path.basename(e.to)),
+    ["report (1).txt", "report (2).txt"],
+  );
+});
+
+test("rejects category and sub-category names that escape the destination", async () => {
+  const now2 = new Date();
+  const sourceFiles = [{ path: "/source/a.txt", name: "a.txt", ext: "txt", size: 1, birthtime: now2, mtime: now2 }];
+  const base = { sourceFiles, duplicates: new Map(), destDir: "/archive", fallbackCategory: "Others" };
+
+  await assert.rejects(
+    buildPlan({ ...base, extIndex: new Map([["txt", "../../outside"]]), folderName: (b) => b }),
+    /Invalid category name/,
+  );
+  // The prefix comes from the config too, and is caught on the first folder built
+  await assert.rejects(
+    buildPlan({ ...base, extIndex, folderName: (b) => `../${b}` }),
+    /Invalid duplicates folder name/,
+  );
+  await assert.rejects(
+    buildPlan({
+      ...base,
+      extIndex,
+      folderName: (b) => b,
+      subIndex: new Map([["Documents", [{ name: "../escape", test: () => true }]]]),
+    }),
+    /Invalid sub-category name/,
+  );
+});
+
+test("undo removes only the folders the run created, keeping ones that predate it", () => {
+  const src = tmp();
+  const dest = tmp();
+  // An archive folder the user had already created themselves
+  const bucket = path.join(dest, "Documents", ym);
+  fs.mkdirSync(bucket, { recursive: true });
+  const from = write(src, "a.txt", "aaa");
+
+  executePlan([{ from, to: path.join(bucket, "a.txt"), name: "a.txt", action: "archive", size: 3 }], {
+    destDir: dest,
+    sourceDir: src,
+  });
+  const result = undoLastRun(dest);
+
+  assert.equal(result.retired, true);
+  assert.equal(result.removedDirs.length, 0);
+  assert.ok(fs.existsSync(bucket));
+  assert.ok(fs.existsSync(path.join(dest, "Documents")));
+});
+
+test("gives two runs started in the same millisecond their own manifests", () => {
+  const src = tmp();
+  const dest = tmp();
+  const RealDate = globalThis.Date;
+  globalThis.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : ["2026-07-31T12:00:00.000Z"]));
+    }
+  };
+  try {
+    const manifests = ["first.txt", "second.txt"].map((name) => {
+      const from = write(src, name, name);
+      return executePlan([{ from, to: path.join(dest, name), name, action: "archive", size: name.length }], {
+        destDir: dest,
+        sourceDir: src,
+      }).manifestPath;
+    });
+
+    assert.notEqual(manifests[0], manifests[1]);
+    assert.equal(fs.readdirSync(path.join(dest, ".tidy", "runs")).filter((f) => f.endsWith(".json")).length, 2);
+  } finally {
+    globalThis.Date = RealDate;
+  }
+});
+
+test("reports a corrupt manifest as a structured error with a code", () => {
+  const dest = tmp();
+  const runsDir = path.join(dest, ".tidy", "runs");
+  fs.mkdirSync(runsDir, { recursive: true });
+  fs.writeFileSync(path.join(runsDir, "broken.json"), '{"moves":');
+
+  assert.throws(
+    () => getLastRun(dest),
+    (err) => err instanceof Error && err.code === "MANIFEST_CORRUPT",
+  );
+});
+
+test("refuses a manifest whose paths point outside the destination", () => {
+  const dest = tmp();
+  const src = tmp();
+  const runsDir = path.join(dest, ".tidy", "runs");
+  fs.mkdirSync(runsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(runsDir, "evil.json"),
+    JSON.stringify({
+      time: "2026-07-31T12:00:00.000Z",
+      sourceDir: src,
+      // `to` points outside destDir — undo would otherwise touch unrelated files
+      moves: [{ from: path.join(src, "a.txt"), to: path.join(os.tmpdir(), "elsewhere.txt"), action: "archive" }],
+    }),
+  );
+
+  assert.throws(
+    () => getLastRun(dest),
+    (err) => err instanceof Error && err.code === "MANIFEST_CORRUPT",
+  );
+});
+
+test("does not count a recorded but unperformed move as restored", () => {
+  const src = tmp();
+  const dest = tmp();
+  const runsDir = path.join(dest, ".tidy", "runs");
+  fs.mkdirSync(runsDir, { recursive: true });
+  const from = write(src, "still-here.txt", "never moved");
+  fs.writeFileSync(
+    path.join(runsDir, "2026-07-31.json"),
+    JSON.stringify({
+      time: "2026-07-31T12:00:00.000Z",
+      sourceDir: src,
+      moves: [{ from, to: path.join(dest, "Documents", ym, "still-here.txt"), action: "archive" }],
+      createdDirs: [],
+    }),
+  );
+
+  const result = undoLastRun(dest);
+  assert.equal(result.retired, true);
+  assert.equal(result.restored, 0); // nothing was restored: the move never happened
+});
+
+test("moves across volumes by copy+verify+unlink, clearing the copy when the source can't be removed", () => {
+  const dir = tmp();
+  const exdev = () => {
+    const e = new Error("cross-device link");
+    e.code = "EXDEV";
+    throw e;
+  };
+
+  const from = write(dir, "a.txt", "cross-volume");
+  const to = path.join(dir, "moved.txt");
+  moveFile(from, to, exdev);
+  assert.equal(fs.existsSync(from), false);
+  assert.equal(fs.readFileSync(to, "utf8"), "cross-volume");
+
+  const keep = write(dir, "b.txt", "keep-source");
+  const copy = path.join(dir, "copy.txt");
+  assert.throws(
+    () =>
+      moveFile(keep, copy, exdev, () => {
+        const e = new Error("source is busy");
+        e.code = "EBUSY";
+        throw e;
+      }),
+    /source is busy/,
+  );
+  // The source survives and no ghost copy is left behind
+  assert.equal(fs.readFileSync(keep, "utf8"), "keep-source");
+  assert.equal(fs.existsSync(copy), false);
+});
+
+test("isInsideDir and canonicalPath", () => {
+  const t = tmp();
+  assert.equal(isInsideDir(t, t), true);
+  assert.equal(isInsideDir(t, path.join(t, "sub")), true);
+  assert.equal(isInsideDir(path.join(t, "sub"), t), false);
+  // A path that doesn't exist yet: canonicalize the deepest existing ancestor, re-append the rest
+  assert.equal(canonicalPath(path.join(t, "nope", "deep")), path.join(canonicalPath(t), "nope", "deep"));
+});
