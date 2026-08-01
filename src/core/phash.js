@@ -79,7 +79,8 @@ export function saveHashCache(destDir, cache, files) {
   const keep = new Set(files.map((f) => f.path));
   const entries = {};
   for (const [p, e] of cache) {
-    if (keep.has(p)) entries[p] = { size: e.size, mtimeMs: e.mtimeMs, hash: e.hash === null ? null : e.hash.toString(16) };
+    if (keep.has(p))
+      entries[p] = { size: e.size, mtimeMs: e.mtimeMs, hash: e.hash === null ? null : e.hash.toString(16) };
   }
   try {
     const file = path.join(destDir, ...CACHE_REL);

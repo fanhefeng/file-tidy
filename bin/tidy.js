@@ -10,48 +10,54 @@ import { executePlan } from "../src/core/execute.js";
 import { bucketLabel, formatSize } from "../src/core/plan.js";
 import { undoLastRun } from "../src/core/undo.js";
 
-const HELP = `tidy — 归档文件、去重、挑出坏文件
+const HELP = `tidy — archive files, quarantine duplicates, set aside broken ones
 
-用法:
-  tidy [源文件夹] [选项]     整理指定文件夹（不传则弹出文件夹选择框）
-  tidy undo [--dest <dir>]  撤销上一次整理（就地整理时 --dest 传源文件夹）
+Usage:
+  tidy [source folder] [options]  Tidy a folder (opens a folder picker when omitted)
+  tidy undo [--dest <dir>]        Undo the last run (for an in-place run, pass the source folder)
 
-选项:
-  --dest <dir>    归档目标目录（不传则运行时询问，回车 = 当前目录；也可在配置文件里固定）
-  --in-place, -p  就地整理：分类目录直接建在源文件夹内，不在其他位置新建目录
-  --create-dest   目标目录不存在时允许新建（默认会先询问；非交互环境不询问直接中止）
-  --yes, -y       跳过整理确认直接执行（不跳过"新建目标目录"的询问）
-  --dry-run, -n   只预览，不移动任何文件
-  --recursive, -r 递归整理子文件夹（默认只整理顶层文件）
-  --plain         关闭疑似重复、坏文件、相似图片三项检测，只做基础归档与字节去重
-  --help, -h      显示帮助
+Options:
+  --dest <dir>    Archive destination (asked at runtime when omitted; can also be fixed in the config)
+  --in-place, -p  Tidy in place: category folders are created inside the source folder
+  --create-dest   Allow creating a destination that doesn't exist (otherwise you're asked first)
+  --yes, -y       Skip the confirmation (the "create destination" prompt is still asked)
+  --dry-run, -n   Preview only, move nothing
+  --recursive, -r Recurse into subfolders (only top-level files by default)
+  --plain         Archive and byte-dedupe only: no near-duplicate, health or similar-image checks
+  --help, -h      Show this help
 
-归档结构: <前缀><类别>/[子类]/[日期]/ —— 前缀默认 ft_，用来和你自己建的目录区分。
-照片视频按年-月分，文档按年分，安装包不按日期分；这些都能在配置里改。
+Layout: <prefix><Category>/[Subcategory]/[date]/ — the default ft_ prefix keeps tidy's output
+apart from folders you made yourself. Photos and videos are filed by year-month, documents by
+year, installers not by date at all; all of it is configurable.
 
-配置: ~/.config/tidy/config.json`;
+Config: ~/.config/tidy/config.json`;
 
-// ---------- 中文文案表（core 只给 code，措辞都在这里；定义在 main() 之前避免 TDZ） ----------
+// ---------- Copy: core returns codes only, every phrasing lives here ----------
+// Declared above main() so the handlers it registers can't hit the TDZ.
 
 const PHASE_TEXT = {
-  scanning: () => "扫描文件…",
-  dedup: ({ files }) => `字节级去重（${files} 个文件）…`,
-  health: () => "检查坏文件与系统垃圾…",
-  similar: () => "查找疑似重复…",
-  perceptual: ({ files, done }) => (done || !files ? null : `比对相似图片（${files} 张）…`),
-  planning: () => "生成整理计划…",
+  scanning: () => "Scanning files…",
+  dedup: ({ files }) => `Checking ${files} files for exact duplicates…`,
+  health: () => "Looking for broken files and OS junk…",
+  similar: () => "Looking for near-duplicates…",
+  perceptual: ({ files, done }) => (done || !files ? null : `Comparing ${files} images…`),
+  planning: () => "Building the plan…",
 };
 
-const ISSUE_TEXT = { empty: "0 字节空文件", corrupt: "内容与扩展名不符", junk: "系统垃圾文件" };
+const ISSUE_TEXT = {
+  empty: "zero-byte file",
+  corrupt: "content doesn't match the extension",
+  junk: "OS junk file",
+};
 
 const SIMILAR_TEXT = {
-  versioned: "同一软件的其他版本",
-  "normalized-name": "换个名字的同一份东西",
-  "same-stem": "同名的另一种格式",
+  versioned: "another version of the same release",
+  "normalized-name": "the same thing under a different name",
+  "same-stem": "the same name in another format",
 };
 
 main().catch((err) => {
-  console.error(styleText("red", `出错了: ${zhError(err)}`));
+  console.error(styleText("red", `Error: ${formatError(err)}`));
   process.exit(1);
 });
 
@@ -77,32 +83,35 @@ async function main() {
 
   const config = loadConfig();
   if (config._created) {
-    console.log(styleText("dim", `已生成默认配置: ${config._path}`));
+    console.log(styleText("dim", `Wrote a default config: ${config._path}`));
   } else if (config._staleCategories?.length) {
     console.log(
       styleText(
         "yellow",
-        `提示：新版新增了 ${config._staleCategories.join("、")} 类别，但你的配置文件里没有，` +
-          `这些文件会落到 ${config.fallbackCategory}。想启用就在 ${config._path} 的 categories 里加上。`,
+        `Note: this version adds the ${config._staleCategories.join(", ")} categories, but your config ` +
+          `doesn't have them, so those files will land in ${config.fallbackCategory}. ` +
+          `Add them under "categories" in ${config._path} to enable them.`,
       ),
     );
   }
   if (positionals[0] === "undo") {
-    const destDir = canonicalPath(expandTilde(flags.dest ?? config.dest ?? (await askDestDir("上次整理的归档目录？"))));
+    const destDir = canonicalPath(
+      expandTilde(flags.dest ?? config.dest ?? (await askDestDir("Which folder did the last run archive into?"))),
+    );
     reportUndo(undoLastRun(destDir), destDir);
     return;
   }
 
   const sourceDir = canonicalPath(expandTilde(positionals[0] ?? pickFolder()));
   if (!fs.existsSync(sourceDir) || !fs.statSync(sourceDir).isDirectory()) {
-    throw new Error(`不是有效的文件夹: ${sourceDir}`);
+    throw new Error(`Not a folder: ${sourceDir}`);
   }
   const inPlace = flags["in-place"];
   // Canonicalize before the containment check so symlinked or differently
   // spelled paths (e.g. /var vs /private/var) can't sneak past it.
   const destDir = inPlace ? sourceDir : canonicalPath(expandTilde(flags.dest ?? config.dest ?? (await askDestDir())));
   if (!inPlace && (isInsideDir(sourceDir, destDir) || isInsideDir(destDir, sourceDir))) {
-    throw new Error("源文件夹和归档目标不能互相包含；想在源文件夹内整理请用 --in-place");
+    throw new Error("Source and destination can't contain each other; use --in-place to tidy inside the source folder");
   }
 
   if (flags.plain) config.detect = false;
@@ -116,41 +125,42 @@ async function main() {
     onPhase: reportPhase,
   });
   if (!sourceFiles.length) {
-    console.log("没有需要整理的文件（隐藏文件和子文件夹会被跳过，递归请加 --recursive）。");
+    console.log("Nothing to tidy (hidden files and subfolders are skipped; add --recursive to recurse).");
     return;
   }
 
   printPlan(entries, { destDir, fallbackCategory: config.fallbackCategory, counts });
 
   if (flags["dry-run"]) {
-    console.log(styleText("dim", "dry-run 模式，未移动任何文件。"));
+    console.log(styleText("dim", "Dry run: nothing was moved."));
     return;
   }
   const destMissing = !fs.existsSync(destDir);
   if (destMissing && !flags["create-dest"]) {
     const ok = await confirm(
-      `目标目录 ${destDir} 不存在，新建它并执行以上整理？`,
-      "新建目录需要明确同意——加 --create-dest 允许新建，或用 --in-place 在源文件夹内整理",
+      `Destination ${destDir} doesn't exist. Create it and run this plan?`,
+      "creating a folder needs explicit consent — pass --create-dest, or --in-place to tidy inside the source folder",
     );
     if (!ok) {
-      console.log("已取消，未新建目录、未移动任何文件。");
+      console.log("Cancelled: no folder created, nothing moved.");
       return;
     }
-  } else if (!flags.yes && !(await confirm("确认执行以上整理？"))) {
-    console.log("已取消，未移动任何文件。");
+  } else if (!flags.yes && !(await confirm("Run this plan?"))) {
+    console.log("Cancelled: nothing moved.");
     return;
   }
 
-  const { moved, manifestPath } = executePlan(entries, { destDir, sourceDir, formatDupBlock: zhDupBlock });
+  const { moved, manifestPath } = executePlan(entries, { destDir, sourceDir });
   console.log(
     styleText(
       "green",
-      `完成：归档 ${counts.archive} 个，隔离重复 ${counts.duplicate} 个，挑出待查 ${counts.review} 个。`,
+      `Done: ${counts.archive} archived, ${plural(counts.duplicate, "duplicate")} quarantined, ` +
+        `${counts.review} set aside for review.`,
     ),
   );
   const firstDup = moved.find((e) => e.action === "duplicate");
-  if (firstDup) console.log(`重复文件详情见 ${path.join(path.dirname(firstDup.to), "manifest.md")}`);
-  console.log(styleText("dim", `本次记录: ${manifestPath}（可用 tidy undo 撤销）`));
+  if (firstDup) console.log(`Duplicate details: ${path.join(path.dirname(firstDup.to), "manifest.md")}`);
+  console.log(styleText("dim", `Run recorded at ${manifestPath} (undo with: tidy undo)`));
 }
 
 function reportPhase(phase, info = {}) {
@@ -158,27 +168,19 @@ function reportPhase(phase, info = {}) {
   if (text) console.log(styleText("dim", text));
 }
 
-// ---------- 中文文案（core 只返回数据和错误码，措辞都在这里） ----------
+// ---------- Copy: formatters ----------
 
-function zhError(err) {
+function formatError(err) {
   switch (err.code) {
     case "CONFIG_PARSE":
-      return `配置文件解析失败（${err.configPath}）：${err.cause?.message ?? ""}`;
+      return `Failed to parse the config file (${err.configPath}): ${err.cause?.message ?? ""}`;
     case "EXDEV_VERIFY":
-      return `跨卷复制校验失败: ${err.path}`;
+      return `Cross-volume copy verification failed: ${err.path}`;
+    case "MANIFEST_CORRUPT":
+      return `This tidy record is unusable, so it can't be undone (${err.manifestPath}): ${err.cause?.message ?? ""}`;
     default:
       return err.message;
   }
-}
-
-function zhDupBlock(dups) {
-  const lines = [`\n## ${new Date().toLocaleString("zh-CN")}\n`];
-  for (const d of dups) {
-    lines.push(
-      `- \`${path.basename(d.to)}\` 与已保留的 \`${d.keeperPath}\` 内容完全相同（SHA-256: ${d.hash.slice(0, 16)}…）`,
-    );
-  }
-  return lines.join("\n") + "\n";
 }
 
 function printPlan(entries, { destDir, fallbackCategory, counts }) {
@@ -193,48 +195,59 @@ function printPlan(entries, { destDir, fallbackCategory, counts }) {
     byBucket.get(bucket).push(e);
   }
 
-  console.log(styleText("bold", `\n整理计划（目标：${destDir}）\n`));
+  console.log(styleText("bold", `\nTidy plan (destination: ${destDir})\n`));
   for (const bucket of [...byBucket.keys()].sort()) {
     const items = byBucket.get(bucket);
-    // 按 entry 记录的类别判断，而不是解析目录名——自定义类别叫 MyOthers 时不误染
+    // Judged by the entry's recorded category rather than by parsing the folder
+    // name, so a custom category called "MyOthers" isn't tinted as the fallback.
     const isFallback = items[0].category === fallbackCategory;
-    console.log(`  ${styleText(isFallback ? "yellow" : "cyan", bucket)}  (${items.length} 个)`);
+    console.log(`  ${styleText(isFallback ? "yellow" : "cyan", bucket)}  (${plural(items.length, "file")})`);
     for (const e of items) {
-      console.log(`    ${e.name}  ${styleText("dim", `[${formatSize(e.size)}${dateTag(e)}]`)}`);
+      // The name it will actually land under: the plan already resolved
+      // " (n)" suffixes, so the preview matches what ends up on disk.
+      console.log(`    ${path.basename(e.to)}  ${styleText("dim", `[${formatSize(e.size)}${dateTag(e)}]`)}`);
       for (const note of hints(e)) console.log(`      ${styleText("dim", note)}`);
     }
   }
 
   if (dups.length) {
-    console.log(`\n  ${styleText("magenta", `重复文件（${dups.length} 个，内容完全相同，移入隔离区）`)}`);
+    console.log(
+      `\n  ${styleText("magenta", `Duplicates (${plural(dups.length, "file")}, identical content, quarantined)`)}`,
+    );
     for (const e of dups) {
-      console.log(`    ${e.name}  ${styleText("dim", `↳ 与之相同: ${e.keeperPath}`)}`);
+      console.log(`    ${path.basename(e.to)}  ${styleText("dim", `↳ identical to: ${e.keeperPath}`)}`);
     }
   }
 
   if (reviews.length) {
-    console.log(`\n  ${styleText("red", `待查文件（${reviews.length} 个，移入待查区，不会删）`)}`);
+    console.log(
+      `\n  ${styleText("red", `Needs review (${plural(reviews.length, "file")}, moved aside, never deleted)`)}`,
+    );
     for (const e of reviews) {
       const why = ISSUE_TEXT[e.issue] ?? e.issue;
-      const detail = e.issue === "corrupt" ? `（声称是 .${e.issueDetail}）` : "";
-      console.log(`    ${e.name}  ${styleText("dim", `↳ ${why}${detail}`)}`);
+      const detail = e.issue === "corrupt" ? ` (claims to be .${e.issueDetail})` : "";
+      console.log(`    ${path.basename(e.to)}  ${styleText("dim", `↳ ${why}${detail}`)}`);
     }
   }
 
-  const parts = [`归档 ${archives.length} 个`, `重复 ${dups.length} 个`, `待查 ${reviews.length} 个`];
-  console.log(styleText("bold", `\n共 ${entries.length} 个文件：${parts.join("，")}`));
+  const parts = [`${archives.length} archived`, plural(dups.length, "duplicate"), `${reviews.length} to review`];
+  console.log(styleText("bold", `\n${plural(entries.length, "file")} in total: ${parts.join(", ")}`));
   if (counts?.similar || counts?.perceptual) {
     const marks = [];
-    if (counts.similar) marks.push(`${counts.similar} 个疑似重复`);
-    if (counts.perceptual) marks.push(`${counts.perceptual} 个相似图片`);
-    console.log(styleText("dim", `另有 ${marks.join("、")}（已标注，仍照常归档，请自行判断）`));
+    if (counts.similar) marks.push(plural(counts.similar, "near-duplicate"));
+    if (counts.perceptual) marks.push(`${counts.perceptual} visually similar`);
+    console.log(styleText("dim", `Also flagged: ${marks.join(", ")} — still archived normally, your call.`));
   }
   console.log("");
 }
 
+function plural(n, noun) {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
 function dateTag(entry) {
   if (!entry.dateBucket) return "";
-  return entry.dateSource === "exif" ? `, ${styleText("green", "EXIF")}` : ", 文件日期";
+  return entry.dateSource === "exif" ? `, ${styleText("green", "EXIF")}` : ", file date";
 }
 
 /** Advisory annotations — these never changed where the file goes. */
@@ -242,42 +255,47 @@ function hints(entry) {
   const out = [];
   if (entry.similar) {
     const what = SIMILAR_TEXT[entry.similar.reason] ?? entry.similar.reason;
-    const peers = entry.similar.peers.map((p) => path.basename(p)).join("、");
-    out.push(`↳ ${what}：${peers}${entry.similar.best ? "（这份看着更完整）" : ""}`);
+    const peers = entry.similar.peers.map((p) => path.basename(p)).join(", ");
+    out.push(`↳ ${what}: ${peers}${entry.similar.best ? " (this one looks the most complete)" : ""}`);
   }
   if (entry.perceptual) {
-    const peers = entry.perceptual.peers.map((p) => path.basename(p)).join("、");
-    out.push(`↳ 画面几乎相同：${peers}${entry.perceptual.best ? "（这份分辨率/体积最大）" : ""}`);
+    const peers = entry.perceptual.peers.map((p) => path.basename(p)).join(", ");
+    out.push(`↳ looks nearly identical to: ${peers}${entry.perceptual.best ? " (largest of the set)" : ""}`);
   }
   return out;
 }
 
-const UNDO_FAILURE_TEXT = { missing: "归档后的文件已不在原位", occupied: "原位置已有同名文件" };
+const UNDO_FAILURE_TEXT = {
+  missing: "the archived file is no longer there",
+  occupied: "the original location is taken",
+};
 
 function reportUndo(result, destDir) {
   if (!result) {
-    console.log("没有可撤销的整理记录。");
+    console.log("No tidy run to undo.");
     return;
   }
   const { time, sourceDir, restored, failures, removedDirs } = result;
   if (!failures.length) {
-    console.log(styleText("green", `已撤销 ${time} 的整理：${restored} 个文件移回 ${sourceDir}`));
+    console.log(
+      styleText("green", `Undid the run from ${time}: ${plural(restored, "file")} moved back to ${sourceDir}`),
+    );
   } else {
     console.log(
-      styleText("yellow", `部分撤销：${restored} 个成功，${failures.length} 个失败（清单保留，未标记为已撤销）：`),
+      styleText("yellow", `Partial undo: ${restored} restored, ${failures.length} failed (the record is kept):`),
     );
     for (const f of failures) {
-      console.log(`  ${f.to} → ${f.from}：${UNDO_FAILURE_TEXT[f.code] ?? f.message ?? f.code}`);
+      console.log(`  ${f.to} → ${f.from}: ${UNDO_FAILURE_TEXT[f.code] ?? f.message ?? f.code}`);
     }
   }
   if (removedDirs.length) {
     console.log(
       styleText(
         "dim",
-        `已清理 ${removedDirs.length} 个空目录：${removedDirs
+        `Removed ${plural(removedDirs.length, "empty folder")}: ${removedDirs
           .map((d) => path.relative(destDir, d))
           .sort()
-          .join("、")}`,
+          .join(", ")}`,
       ),
     );
   }
@@ -288,18 +306,18 @@ function reportLeftover(destDir) {
   if (!fs.existsSync(destDir)) return;
   const leftover = fs.readdirSync(destDir).filter((n) => n !== ".DS_Store");
   if (!leftover.length || leftover.every((n) => n === ".tidy")) {
-    console.log(`目标目录 ${destDir} 现在只剩 .tidy 整理记录，不再需要的话可以整个删除（我不会自动删）。`);
+    console.log(`${destDir} now holds nothing but the .tidy records — delete it yourself if you don't need them.`);
   }
 }
 
-// ---------- 交互 ----------
+// ---------- Interaction ----------
 
 /** Native folder picker: osascript / PowerShell / zenity·kdialog by platform. */
 function pickFolder() {
-  console.log("未指定文件夹，弹出选择框…（如果没看到，检查一下是否被其他窗口挡住）");
+  console.log("No folder given, opening a picker… (check behind other windows if you don't see it)");
   const picked = pickFolderNative();
   if (!picked) {
-    throw new Error("未选择文件夹（也可以直接指定路径：tidy ~/Downloads）");
+    throw new Error("No folder selected (you can also pass a path: tidy ~/Downloads)");
   }
   return picked;
 }
@@ -308,26 +326,26 @@ function pickFolderNative() {
   if (process.platform === "darwin") {
     const script = `
       tell application "System Events" to activate
-      POSIX path of (choose folder with prompt "选择要整理的文件夹")`;
+      POSIX path of (choose folder with prompt "Choose the folder to tidy")`;
     return runPicker("osascript", ["-e", script]);
   }
   if (process.platform === "win32") {
     const script = `
       Add-Type -AssemblyName System.Windows.Forms
       $d = New-Object System.Windows.Forms.FolderBrowserDialog
-      $d.Description = '选择要整理的文件夹'
+      $d.Description = 'Choose the folder to tidy'
       $d.ShowNewFolderButton = $false
       if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $d.SelectedPath }`;
     return runPicker("powershell", ["-NoProfile", "-STA", "-NonInteractive", "-Command", script]);
   }
   // Linux: use whichever common dialog tool is installed.
   if (hasCommand("zenity")) {
-    return runPicker("zenity", ["--file-selection", "--directory", "--title=选择要整理的文件夹"]);
+    return runPicker("zenity", ["--file-selection", "--directory", "--title=Choose the folder to tidy"]);
   }
   if (hasCommand("kdialog")) {
-    return runPicker("kdialog", ["--getexistingdirectory", process.cwd(), "--title", "选择要整理的文件夹"]);
+    return runPicker("kdialog", ["--getexistingdirectory", process.cwd(), "--title", "Choose the folder to tidy"]);
   }
-  throw new Error("没有可用的图形选择框（需要 zenity 或 kdialog）：请直接指定路径，如 tidy ~/Downloads");
+  throw new Error("No graphical folder picker available (needs zenity or kdialog): pass a path, e.g. tidy ~/Downloads");
 }
 
 function hasCommand(cmd) {
@@ -349,20 +367,20 @@ function runPicker(cmd, args) {
 }
 
 /** Ask for the destination dir when neither --dest nor config sets one. */
-async function askDestDir(question = "归档到哪个目录？") {
+async function askDestDir(question = "Archive into which folder?") {
   if (!process.stdin.isTTY) {
-    throw new Error("未指定归档目标目录：非交互环境请用 --dest <dir> 指定，或在配置文件里设置 dest");
+    throw new Error('No destination given: pass --dest <dir>, or set "dest" in the config file');
   }
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const answer = (await rl.question(`${question} [回车 = 当前目录 ${process.cwd()}] `)).trim();
+  const answer = (await rl.question(`${question} [Enter = current directory ${process.cwd()}] `)).trim();
   rl.close();
   return answer || process.cwd();
 }
 
 async function confirm(question, nonInteractiveHint) {
   if (!process.stdin.isTTY) {
-    const hint = nonInteractiveHint ?? "请加 --yes 直接执行，或在终端窗口里运行";
-    console.log(styleText("yellow", `当前是非交互环境，无法回答确认提示：${hint}。未移动任何文件。`));
+    const hint = nonInteractiveHint ?? "pass --yes to run without confirming, or run this in a terminal";
+    console.log(styleText("yellow", `Non-interactive shell, can't ask for confirmation: ${hint}. Nothing was moved.`));
     return false;
   }
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });

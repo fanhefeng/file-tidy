@@ -14,33 +14,50 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const coreSrc = path.join(root, "src", "core");
 const coreCopy = path.join(root, "raycast", "src", "core");
+// The Store copy carries the suite too (the Raycast reviewer added it there
+// and runs `npm test` in the extension folder). Both spell their imports
+// "../src/core/…", so the files copy over verbatim.
+const testSrc = path.join(root, "test");
+const testCopy = path.join(root, "raycast", "tests");
 const forkRepo = path.join(os.homedir(), ".config", "raycast", "public-extensions-fork");
 const forkExt = path.join(forkRepo, "extensions", "file-tidy");
 const SKIP = new Set(["node_modules", "dist"]);
 
+const PAIRS = [
+  [coreSrc, coreCopy],
+  [testSrc, testCopy],
+];
+
 if (process.argv.includes("--check")) {
-  const drifted = diffDirs(coreSrc, coreCopy);
-  if (drifted.length) {
-    console.error(`raycast/src/core 与 src/core 不一致（跑 node scripts/sync.js 同步）:`);
+  let ok = true;
+  for (const [src, copy] of PAIRS) {
+    const drifted = diffDirs(src, copy);
+    if (!drifted.length) continue;
+    ok = false;
+    console.error(
+      `${path.relative(root, copy)} has drifted from ${path.relative(root, src)} (run: node scripts/sync.js):`,
+    );
     for (const f of drifted) console.error(`  ${f}`);
-    process.exit(1);
   }
-  console.log("src/core 与 raycast/src/core 一致。");
+  if (!ok) process.exit(1);
+  console.log("The Raycast copies of src/core and test are in sync.");
   process.exit(0);
 }
 
-mirror(coreSrc, coreCopy);
-console.log(`已同步 src/core -> ${path.relative(root, coreCopy)}`);
+for (const [src, copy] of PAIRS) {
+  mirror(src, copy);
+  console.log(`Synced ${path.relative(root, src)} -> ${path.relative(root, copy)}`);
+}
 
 if (process.argv.includes("--fork")) {
   if (!fs.existsSync(forkRepo)) {
-    console.error(`找不到 fork 检出: ${forkRepo}`);
+    console.error(`Fork checkout not found: ${forkRepo}`);
     process.exit(1);
   }
   mirror(path.join(root, "raycast"), forkExt);
-  console.log(`已同步 raycast/ -> ${forkExt}\n`);
-  console.log(execFileSync("git", ["-C", forkRepo, "status", "--short"], { encoding: "utf8" }) || "(fork 无变更)");
-  console.log("确认无误后在 fork 里 commit + push 即可更新 PR。");
+  console.log(`Synced raycast/ -> ${forkExt}\n`);
+  console.log(execFileSync("git", ["-C", forkRepo, "status", "--short"], { encoding: "utf8" }) || "(fork unchanged)");
+  console.log("Review the diff, then commit and push in the fork to update the PR.");
 }
 
 /** Replace dest with an exact copy of src (skipping node_modules/dist). */

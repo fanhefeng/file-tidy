@@ -50,9 +50,9 @@ function rel(entry, destDir) {
   return path.relative(destDir, entry.to);
 }
 
-// ---------- 目录前缀 ----------
+// ---------- Folder prefix ----------
 
-test("前缀：新目标目录下所有生成目录都带 ft_", async () => {
+test("prefix: every folder created in a fresh destination carries ft_", async () => {
   const src = tmp();
   const dest = tmp();
   write(src, "a.txt", "aaa");
@@ -63,7 +63,7 @@ test("前缀：新目标目录下所有生成目录都带 ft_", async () => {
   assert.deepEqual(paths, [path.join("ft_Documents", yr, "a.txt"), path.join("ft_Images", ym, "b.jpg")]);
 });
 
-test("前缀：目标目录已有无前缀的旧归档目录时沿用旧的，不分裂", async () => {
+test("prefix: an existing un-prefixed archive folder is reused instead of split in two", async () => {
   const src = tmp();
   const dest = tmp();
   fs.mkdirSync(path.join(dest, "Images", "2020-01"), { recursive: true });
@@ -72,41 +72,41 @@ test("前缀：目标目录已有无前缀的旧归档目录时沿用旧的，�
 
   const { entries } = await analyze({ sourceDir: src, destDir: dest, config: cfg() });
   const byName = Object.fromEntries(entries.map((e) => [e.name, rel(e, dest)]));
-  // Images 已存在（无前缀）-> 沿用；Documents 不存在 -> 用新前缀
+  // Images exists un-prefixed -> reuse it; Documents doesn't -> use the new prefix
   assert.equal(byName["b.jpg"], path.join("Images", ym, "b.jpg"));
   assert.equal(byName["a.txt"], path.join("ft_Documents", yr, "a.txt"));
 });
 
-test("前缀：folderPrefix 为空时行为与旧版一致", () => {
+test("prefix: an empty folderPrefix behaves exactly like the pre-prefix versions", () => {
   const dest = tmp();
   const name = buildFolderNamer(dest, cfg({ folderPrefix: "" }));
   assert.equal(name("Images"), "Images");
 });
 
-test("organizedDirNames：旧名字含两种写法，0.5.0 新增名字只认带前缀的", () => {
+test("organizedDirNames: pre-prefix names carry both spellings, names added in 0.5.0 only the prefixed one", () => {
   const names = organizedDirNames(cfg());
   for (const n of ["Images", "ft_Images", "Duplicates", "ft_Duplicates", "ft_Review", "Others", "ft_Others"]) {
-    assert.ok(names.has(n), `缺少 ${n}`);
+    assert.ok(names.has(n), `missing ${n}`);
   }
-  // Review 是 0.5.0 才有的名字，无前缀写法只可能是用户自己的目录
+  // Review only exists from 0.5.0 on, so an un-prefixed one can only be the user's own
   assert.ok(!names.has("Review"));
 });
 
-test("前缀沿用：不吞用户自己的 Review 目录（0.5.0 新增名字无旧档可沿用）", () => {
+test("prefix reuse: never adopts the user's own Review folder", () => {
   const dest = tmp();
   fs.mkdirSync(path.join(dest, "Review"));
   const name = buildFolderNamer(dest, cfg());
   assert.equal(name("Review"), "ft_Review");
 });
 
-test("前缀沿用：目标下同名的是普通文件时不沿用，避免执行阶段 ENOTDIR", () => {
+test("prefix reuse: skips a same-named plain file, which would die with ENOTDIR at execution", () => {
   const dest = tmp();
   write(dest, "Images", "just a file named Images");
   const name = buildFolderNamer(dest, cfg());
   assert.equal(name("Images"), "ft_Images");
 });
 
-test("改 folderPrefix 后，旧前缀的隔离区仍被跳过、不充当去重 keeper", async () => {
+test("quarantine folders from a previous prefix are still skipped and never act as dedup keepers", async () => {
   const src = tmp();
   const dest = tmp();
   write(dest, path.join("ft_Duplicates", "old.jpg"), "SHARED");
@@ -116,11 +116,11 @@ test("改 folderPrefix 后，旧前缀的隔离区仍被跳过、不充当去重
   assert.equal(entries[0].action, "archive");
 });
 
-test("旧配置缺少新版类别时被标记出来，但不会被自动补进去", async () => {
+test("a config missing newer categories is reported, never silently patched", async () => {
   const home = tmp();
   const cfgPath = path.join(home, "tidy", "config.json");
   fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
-  // 模拟旧版本写下的配置：只有 5 个类别，没有 Fonts
+  // A config an older version would have written: five categories, no Fonts
   fs.writeFileSync(
     cfgPath,
     JSON.stringify({
@@ -130,7 +130,7 @@ test("旧配置缺少新版类别时被标记出来，但不会被自动补进�
     }),
   );
 
-  // config.js 在模块加载时就定下路径，所以用子进程带着改过的 XDG_CONFIG_HOME 跑
+  // config.js resolves its path at module load, so run a child process with a patched XDG_CONFIG_HOME
   const { execFileSync } = await import("node:child_process");
   const script = `
     import { loadConfig } from ${JSON.stringify(new URL("../src/core/config.js", import.meta.url).href)};
@@ -142,13 +142,13 @@ test("旧配置缺少新版类别时被标记出来，但不会被自动补进�
     encoding: "utf8",
   });
   const { stale, cats } = JSON.parse(out.trim().split("\n").pop());
-  assert.deepEqual(stale, ["Fonts"]); // 报出来
-  assert.ok(!cats.includes("Fonts")); // 但没有擅自加进去
+  assert.deepEqual(stale, ["Fonts"]); // reported
+  assert.ok(!cats.includes("Fonts")); // but not added behind the user's back
 });
 
-// ---------- 归档粒度 ----------
+// ---------- Date depth ----------
 
-test("归档粒度：month / year / none 三档各自生效", async () => {
+test("date depth: month / year / none each take effect", async () => {
   const src = tmp();
   const dest = tmp();
   write(src, "p.jpg", "img");
@@ -162,9 +162,9 @@ test("归档粒度：month / year / none 三档各自生效", async () => {
   assert.equal(byName["z.zip"], path.join("ft_Archives", "z.zip")); // none
 });
 
-// ---------- 二级主题分类 ----------
+// ---------- Subcategories ----------
 
-test("二级分类：按扩展名和按文件名两种规则都生效，落在日期层之上", async () => {
+test("subcategories: extension and filename rules both apply, above the date level", async () => {
   const src = tmp();
   const dest = tmp();
   write(src, "Screenshot 2026-07-27.jpg", "shot");
@@ -180,18 +180,18 @@ test("二级分类：按扩展名和按文件名两种规则都生效，落在�
   );
   assert.equal(byName["novel.epub"], path.join("ft_Documents", "Ebooks", yr, "novel.epub"));
   assert.equal(byName["Tool-1.0.0.dmg"], path.join("ft_Archives", "Installers", "Tool-1.0.0.dmg"));
-  assert.equal(byName["plain.jpg"], path.join("ft_Images", ym, "plain.jpg")); // 无子分类
+  assert.equal(byName["plain.jpg"], path.join("ft_Images", ym, "plain.jpg")); // no subcategory
 });
 
-test("二级分类：坏正则被跳过，同规则里的其余部分仍生效", () => {
+test("subcategories: an unparsable regex is dropped, the rest of the rule still applies", () => {
   const index = buildSubIndex({ Documents: [{ name: "X", match: ["([bad"], exts: ["epub"] }] });
   const file = { name: "a.epub", ext: "epub" };
   assert.equal(subClassify(file, "Documents", index), "X");
 });
 
-// ---------- 疑似重复 ----------
+// ---------- Near-duplicates ----------
 
-test("疑似重复：版本号包只保留最新一个为 best", () => {
+test("near-duplicates: only the newest release in a version group is marked best", () => {
   const files = [
     { path: "/a/App-1.0.5.dmg", name: "App-1.0.5.dmg", ext: "dmg", size: 100 },
     { path: "/a/App-1.0.6.dmg", name: "App-1.0.6.dmg", ext: "dmg", size: 100 },
@@ -199,12 +199,12 @@ test("疑似重复：版本号包只保留最新一个为 best", () => {
   ];
   const found = findSimilar(files);
   assert.equal(found.size, 3);
-  assert.equal(found.get("/a/App-1.0.10.dmg").best, true); // 1.0.10 > 1.0.6，非字典序
+  assert.equal(found.get("/a/App-1.0.10.dmg").best, true); // 1.0.10 > 1.0.6, compared numerically
   assert.equal(found.get("/a/App-1.0.5.dmg").best, false);
   assert.equal(found.get("/a/App-1.0.5.dmg").reason, "versioned");
 });
 
-test("疑似重复：剥离来源水印与副本标记后同名的判为一组，保留最大的一份", () => {
+test("near-duplicates: names matching once watermarks and copy markers are stripped group together, largest wins", () => {
   const files = [
     { path: "/a/CSS权威指南 第3版.pdf", name: "CSS权威指南 第3版.pdf", ext: "pdf", size: 900 },
     {
@@ -220,7 +220,7 @@ test("疑似重复：剥离来源水印与副本标记后同名的判为一组�
   assert.equal(found.get("/a/CSS权威指南 第3版.pdf").reason, "normalized-name");
 });
 
-test("疑似重复：同名不同格式判为 same-stem", () => {
+test("near-duplicates: the same name in another format is reported as same-stem", () => {
   const files = [
     { path: "/a/report.pdf", name: "report.pdf", ext: "pdf", size: 900 },
     { path: "/a/report.epub", name: "report.epub", ext: "epub", size: 100 },
@@ -230,7 +230,7 @@ test("疑似重复：同名不同格式判为 same-stem", () => {
   assert.equal(found.get("/a/report.pdf").best, true);
 });
 
-test("疑似重复：名字太短不成组，避免误判", () => {
+test("near-duplicates: names too short to be meaningful never group", () => {
   const files = [
     { path: "/a/a.pdf", name: "a.pdf", ext: "pdf", size: 1 },
     { path: "/a/b.pdf", name: "b.pdf", ext: "pdf", size: 1 },
@@ -238,7 +238,7 @@ test("疑似重复：名字太短不成组，避免误判", () => {
   assert.equal(findSimilar(files).size, 0);
 });
 
-test("疑似重复：只标注不改归档去向", async () => {
+test("near-duplicates: flagged only, the destination is unchanged", async () => {
   const src = tmp();
   const dest = tmp();
   write(src, "Guide-1.0.0.zip", "one");
@@ -250,13 +250,13 @@ test("疑似重复：只标注不改归档去向", async () => {
     config: cfg({ detect: { similar: true, health: false, perceptual: false } }),
   });
   assert.equal(counts.similar, 2);
-  assert.ok(entries.every((e) => e.action === "archive")); // 仍然正常归档
+  assert.ok(entries.every((e) => e.action === "archive")); // still archived normally
   assert.ok(entries.every((e) => rel(e, dest).startsWith("ft_Archives")));
 });
 
-// ---------- 健康检查 ----------
+// ---------- Health checks ----------
 
-test("健康检查：0 字节、魔数不符、系统垃圾三类都能识别", () => {
+test("health: zero-byte files, magic-number mismatches and OS junk are all recognised", () => {
   const dir = tmp();
   const empty = write(dir, "empty.pdf", "");
   const fake = write(dir, "fake.pdf", "this is definitely not a pdf");
@@ -275,10 +275,10 @@ test("健康检查：0 字节、魔数不符、系统垃圾三类都能识别", 
   assert.equal(issues.get(fake).issue, "corrupt");
   assert.equal(issues.has(real), false);
   assert.equal(issues.get(junk).issue, "junk");
-  assert.equal(issues.has(unknown), false); // 未知扩展名不下判断
+  assert.equal(issues.has(unknown), false); // an unknown extension is never judged
 });
 
-test("健康检查：问题文件进 ft_Review/<类别>/，正常文件不受影响", async () => {
+test("health: flagged files go to ft_Review/<issue>/, sound files are unaffected", async () => {
   const src = tmp();
   const dest = tmp();
   write(src, "ok.txt", "fine");
@@ -297,7 +297,7 @@ test("健康检查：问题文件进 ft_Review/<类别>/，正常文件不受影
   assert.equal(byName["ok.txt"], path.join("ft_Documents", yr, "ok.txt"));
 });
 
-test("detect: false 一键关闭全部检测，包括未来新增的检测项", async () => {
+test("detect: false turns off every pass at once, including ones added later", async () => {
   const src = tmp();
   const dest = tmp();
   write(src, "a.txt", "fine");
@@ -317,7 +317,7 @@ test("detect: false 一键关闭全部检测，包括未来新增的检测项", 
   assert.ok(entries.every((e) => e.action === "archive"));
 });
 
-test("健康检查关闭时，.DS_Store 不进扫描范围", async () => {
+test("with health checks off, .DS_Store never enters the scan at all", async () => {
   const src = tmp();
   const dest = tmp();
   write(src, "ok.txt", "fine");
@@ -328,7 +328,7 @@ test("健康检查关闭时，.DS_Store 不进扫描范围", async () => {
   assert.equal(entries[0].name, "ok.txt");
 });
 
-test("健康检查先于去重：字节相同的垃圾文件都进 Review，不再互相判重", async () => {
+test("health runs before dedup: byte-identical junk all goes to review, never judged duplicates", async () => {
   const src = tmp();
   const dest = tmp();
   write(src, path.join("sub1", ".DS_Store"), "same junk bytes");
@@ -344,7 +344,7 @@ test("健康检查先于去重：字节相同的垃圾文件都进 Review，不�
   assert.equal(counts.duplicate, 0);
 });
 
-test("健康检查：合法的裸帧 MP3 / mdat 开头的 MOV / AIFC 不再误判 corrupt", () => {
+test("health: bare-frame MP3, mdat-leading MOV and AIFC are no longer misjudged as corrupt", () => {
   const dir = tmp();
   const mp3 = write(dir, "bare.mp3", Buffer.from([0xff, 0xfa, 0x90, 0x00, 0x11, 0x22, 0x33, 0x44]));
   const mov = write(dir, "old.mov", Buffer.concat([Buffer.from([0, 0, 0, 8]), Buffer.from("mdat12345678")]));
@@ -364,10 +364,10 @@ test("健康检查：合法的裸帧 MP3 / mdat 开头的 MOV / AIFC 不再误�
   assert.equal(issues.get(fake).issue, "corrupt");
 });
 
-test("scanSource 默认不收隐藏文件，includeJunk 只额外收已知垃圾名", () => {
+test("scanSource skips hidden files by default; includeJunk only adds known junk names", () => {
   const src = tmp();
   write(src, ".DS_Store", "junk");
-  write(src, ".env", "SECRET=1"); // 隐藏但不是垃圾，任何时候都不该被收
+  write(src, ".env", "SECRET=1"); // hidden but not junk — must never be collected
   write(src, "a.txt", "a");
 
   assert.deepEqual(
@@ -384,11 +384,12 @@ test("scanSource 默认不收隐藏文件，includeJunk 只额外收已知垃圾
   );
 });
 
-// ---------- 感知哈希 ----------
+// ---------- Perceptual hashing ----------
 
 /**
- * 生成一张渐变图。坐标按宽高归一化，所以同一 shift 下不同分辨率画出的是
- * 同一幅图——正是感知哈希该认出来的"换个尺寸重新导出"。
+ * Build a gradient image. Coordinates are normalised by width/height, so the
+ * same `shift` at a different resolution draws the same picture — exactly what
+ * perceptual hashing is meant to recognise as "re-exported at another size".
  */
 function makeJpeg(dir, name, { width = 64, height = 64, shift = 0, quality = 90 }) {
   const data = Buffer.alloc(width * height * 4);
@@ -407,7 +408,7 @@ function makeJpeg(dir, name, { width = 64, height = 64, shift = 0, quality = 90 
   return write(dir, name, jpg);
 }
 
-test("感知哈希：同一图像的不同尺寸/质量导出被聚为一簇，保留最大的一份", async () => {
+test("phash: exports of one image at different sizes/qualities cluster, the largest is best", async () => {
   const dir = tmp();
   const big = makeJpeg(dir, "orig.jpg", { width: 128, height: 128, quality: 95 });
   const small = makeJpeg(dir, "resized.jpg", { width: 64, height: 64, quality: 60 });
@@ -425,18 +426,18 @@ test("感知哈希：同一图像的不同尺寸/质量导出被聚为一簇，�
   const clusters = clusterByHash(hashes, new Map(files.map((f) => [f.path, f])), 5);
   assert.equal(clusters.has(big), true);
   assert.equal(clusters.has(small), true);
-  assert.equal(clusters.get(big).best, true); // 最大的那份
-  assert.equal(clusters.has(other), false); // 内容不同，不入簇
+  assert.equal(clusters.get(big).best, true); // the largest copy
+  assert.equal(clusters.has(other), false); // different content, no cluster
 });
 
-test("感知哈希：不可解码的文件被跳过而不是报错", async () => {
+test("phash: an undecodable file is skipped rather than fatal", async () => {
   const dir = tmp();
   const broken = write(dir, "broken.jpg", "not a jpeg at all");
   const hashes = await hashImages([{ path: broken, name: "broken.jpg", ext: "jpg", size: 17 }]);
   assert.equal(hashes.size, 0);
 });
 
-test("感知哈希：只标注不改归档去向", async () => {
+test("phash: flagged only, the destination is unchanged", async () => {
   const src = tmp();
   const dest = tmp();
   makeJpeg(src, "a.jpg", { width: 128, height: 128, quality: 95 });
@@ -451,7 +452,7 @@ test("感知哈希：只标注不改归档去向", async () => {
   assert.ok(entries.every((e) => e.action === "archive"));
 });
 
-test("感知哈希：缓存按 path+size+mtime 命中，落盘后可读回", async () => {
+test("phash: the cache hits on path+size+mtime and survives a round trip to disk", async () => {
   const dir = tmp();
   const p = makeJpeg(dir, "a.jpg", {});
   const stat = fs.statSync(p);
@@ -465,7 +466,8 @@ test("感知哈希：缓存按 path+size+mtime 命中，落盘后可读回", asy
   const loaded = loadHashCache(dir);
   assert.equal(loaded.get(p).hash, first.get(p));
 
-  // 真命中：换成同尺寸的不可解码内容并还原 mtime——仍返回缓存哈希，说明没有重新解码
+  // A real hit: swap in undecodable content of the same size and restore mtime —
+  // still the cached hash, which proves nothing was decoded again
   const stat2 = fs.statSync(p);
   fs.writeFileSync(p, Buffer.alloc(stat.size, 1));
   fs.utimesSync(p, stat2.atime, stat.mtime);
@@ -473,7 +475,7 @@ test("感知哈希：缓存按 path+size+mtime 命中，落盘后可读回", asy
   assert.equal(again.get(p), first.get(p));
 });
 
-test("感知哈希：源批次没有可哈希图片时整个 pass 被跳过", async () => {
+test("phash: the whole pass is skipped when the source batch holds no hashable image", async () => {
   const src = tmp();
   const dest = tmp();
   write(src, "doc.txt", "no images here");
@@ -489,7 +491,7 @@ test("感知哈希：源批次没有可哈希图片时整个 pass 被跳过", as
   assert.ok(!phases.includes("perceptual"));
 });
 
-test("重复文件恰好名为 manifest.md 时让位，去重清单不被污染", async () => {
+test("a duplicate named manifest.md steps aside, leaving the dedup manifest uncontaminated", async () => {
   const src = tmp();
   const dest = tmp();
   write(src, "notes.txt", "SAMEBYTES");
@@ -500,25 +502,25 @@ test("重复文件恰好名为 manifest.md 时让位，去重清单不被污染"
   executePlan(entries, { destDir: dest, sourceDir: src });
 
   const dupDir = path.join(dest, "ft_Duplicates");
-  // 用户的文件带后缀落位，内容原封不动
+  // The user's file lands with a suffix, contents untouched
   assert.equal(fs.readFileSync(path.join(dupDir, "manifest (1).md"), "utf8"), "SAMEBYTES");
-  // 清单本体只有去重记录
+  // The manifest itself holds nothing but dedup records
   assert.ok(!fs.readFileSync(path.join(dupDir, "manifest.md"), "utf8").includes("SAMEBYTES"));
 });
 
-// ---------- 端到端 ----------
+// ---------- End to end ----------
 
-test("端到端：四类去向同时出现，执行后落盘位置正确且可撤销", async () => {
+test("end to end: all four destinations at once, landing correctly and undoable", async () => {
   const src = tmp();
   const dest = tmp();
-  // 真实 JPEG 字节：否则会先被健康检查判成 corrupt，走不到去重那步
+  // Real JPEG bytes: otherwise the health pass calls it corrupt and dedup never sees it
   const realJpeg = fs.readFileSync(makeJpeg(tmp(), "seed.jpg", {}));
   write(src, "photo.jpg", realJpeg);
-  write(src, "photo copy.jpg", realJpeg); // 字节重复
-  write(src, "broken.pdf", ""); // 0 字节
+  write(src, "photo copy.jpg", realJpeg); // byte-identical
+  write(src, "broken.pdf", ""); // zero bytes
   write(src, "novel.epub", "PK\x03\x04fake-but-valid-magic");
   write(src, "App-1.0.0.dmg", "v1");
-  write(src, "App-1.1.0.dmg", "v2"); // 疑似重复（版本）
+  write(src, "App-1.1.0.dmg", "v2"); // near-duplicate by version
 
   const config = cfg({ detect: { similar: true, health: true, perceptual: false } });
   const { entries, counts } = await analyze({ sourceDir: src, destDir: dest, config });
@@ -529,7 +531,7 @@ test("端到端：四类去向同时出现，执行后落盘位置正确且可�
   executePlan(entries, { destDir: dest, sourceDir: src });
   assert.ok(fs.existsSync(path.join(dest, "ft_Images", ym, "photo.jpg")));
   assert.ok(fs.existsSync(path.join(dest, "ft_Duplicates", "photo copy.jpg")));
-  // 清单里的 keeper 必须指向它归档后的真实位置，而不是已经不存在的源路径
+  // The keeper in the manifest must point where it actually landed, not at a source path that no longer exists
   const manifest = fs.readFileSync(path.join(dest, "ft_Duplicates", "manifest.md"), "utf8");
   assert.match(manifest, /ft_Images/);
   assert.ok(!manifest.includes(path.join(src, "photo.jpg")));
@@ -538,14 +540,14 @@ test("端到端：四类去向同时出现，执行后落盘位置正确且可�
   assert.ok(fs.existsSync(path.join(dest, "ft_Archives", "Installers", "App-1.1.0.dmg")));
 });
 
-test("端到端：隔离区里的文件不会被当成归档内容再次参与去重", async () => {
+test("end to end: quarantined files are never rescanned as archived content", async () => {
   const src = tmp();
   const dest = tmp();
-  // 上一轮被隔离的重复文件
+  // A duplicate quarantined by an earlier run
   write(dest, path.join("ft_Duplicates", "old.jpg"), "SHARED");
   write(src, "new.jpg", "SHARED");
 
   const { entries } = await analyze({ sourceDir: src, destDir: dest, config: cfg() });
-  // 若隔离区被当作 keeper，这里会变成 duplicate
+  // If the quarantine folder acted as a keeper, this would come back as a duplicate
   assert.equal(entries[0].action, "archive");
 });
