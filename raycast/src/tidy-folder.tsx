@@ -16,7 +16,7 @@ import {
 } from "@raycast/api";
 import fs from "node:fs";
 import path from "node:path";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { analyze, type AnalyzeCounts, type Phase } from "./core/analyze.js";
 import { canonicalPath, isInsideDir, loadConfig } from "./core/config.js";
 import { executePlan } from "./core/execute.js";
@@ -42,16 +42,24 @@ const PHASE_TEXT: Partial<Record<Phase, string | ((info: { files?: number; done?
 };
 
 const ISSUE_TEXT: Record<string, string> = {
-  empty: "zero-byte file",
-  corrupt: "content doesn't match the extension",
+  empty: "Zero-byte file",
+  corrupt: "Content doesn't match the extension",
   junk: "OS junk file",
 };
 
 const SIMILAR_TEXT: Record<string, string> = {
-  versioned: "another version of the same release",
-  "normalized-name": "the same thing under a different name",
-  "same-stem": "the same name in another format",
+  versioned: "Another version of the same release",
+  "normalized-name": "The same thing under a different name",
+  "same-stem": "The same name in another format",
 };
+
+function isDirectory(filePath: string) {
+  try {
+    return fs.statSync(filePath).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 export default function TidyFolderCommand() {
   const { push } = useNavigation();
@@ -70,6 +78,16 @@ export default function TidyFolderCommand() {
     const pickedDest = values.inPlace ? pickedSource : (values.dest[0] ?? defaultDest);
     if (!pickedDest) {
       setDestError("Pick a destination folder, or set a default one in the extension preferences");
+      return;
+    }
+    // A folder picked earlier (or a stale default destination) may be gone or
+    // replaced by a file by the time the form is submitted.
+    if (!isDirectory(pickedSource)) {
+      setSourceError("The selected source folder no longer exists");
+      return;
+    }
+    if (fs.existsSync(pickedDest) && !isDirectory(pickedDest)) {
+      setDestError("The selected destination is not a folder");
       return;
     }
     // Canonicalize before the containment check so symlinked or differently
@@ -186,6 +204,10 @@ function PlanView({
   sourceDir: string;
   destDir: string;
 }) {
+  // A ref, not the state flag: two Enter presses land in the same render pass,
+  // and both would still see `executing === false`.
+  const executingRef = useRef(false);
+  const [executing, setExecuting] = useState(false);
   const archives = entries.filter((e) => e.action === "archive");
   const dups = entries.filter((e) => e.action === "duplicate");
   const reviews = entries.filter((e) => e.action === "review");
@@ -197,19 +219,23 @@ function PlanView({
   }
 
   async function execute() {
-    const destMissing = !fs.existsSync(destDir);
-    const ok = await confirmAlert({
-      title: destMissing ? "Create destination and tidy?" : "Run this tidy plan?",
-      message:
-        `${destMissing ? `Destination ${destDir} doesn't exist and will be created.\n` : ""}` +
-        `Archive ${archives.length} files, quarantine ${dups.length} duplicates, ` +
-        `move ${reviews.length} to review → ${destDir}`,
-      primaryAction: { title: "Tidy", style: Alert.ActionStyle.Default },
-    });
-    if (!ok) return;
-
-    const toast = await showToast({ style: Toast.Style.Animated, title: "Tidying…" });
+    if (executingRef.current) return;
+    executingRef.current = true;
+    setExecuting(true);
+    let toast: Toast | undefined;
     try {
+      const destMissing = !fs.existsSync(destDir);
+      const ok = await confirmAlert({
+        title: destMissing ? "Create destination and tidy?" : "Run this tidy plan?",
+        message:
+          `${destMissing ? `Destination ${destDir} doesn't exist and will be created.\n` : ""}` +
+          `Archive ${archives.length} files, quarantine ${dups.length} duplicates, ` +
+          `move ${reviews.length} to review → ${destDir}`,
+        primaryAction: { title: "Tidy", style: Alert.ActionStyle.Default },
+      });
+      if (!ok) return;
+
+      toast = await showToast({ style: Toast.Style.Animated, title: "Tidying…" });
       executePlan(entries, { destDir, sourceDir });
       toast.style = Toast.Style.Success;
       toast.title = `Done: ${counts.archive} archived, ${counts.duplicate} duplicates, ${counts.review} to review`;
@@ -220,16 +246,26 @@ function PlanView({
       };
       await popToRoot();
     } catch (err) {
-      toast.style = Toast.Style.Failure;
-      toast.title = "Tidy failed";
-      toast.message = err instanceof Error ? err.message : String(err);
+      // The plan is built before the confirmation, so a failure here can land
+      // before the progress toast exists.
+      const message = err instanceof Error ? err.message : String(err);
+      if (toast) {
+        toast.style = Toast.Style.Failure;
+        toast.title = "Tidy failed";
+        toast.message = message;
+      } else {
+        await showToast({ style: Toast.Style.Failure, title: "Tidy failed", message });
+      }
+    } finally {
+      executingRef.current = false;
+      setExecuting(false);
     }
   }
 
   const executeAction = (
     <ActionPanel>
       <Action title="Run Tidy Plan" icon={Icon.Checkmark} onAction={execute} />
-      <Action.ShowInFinder title="Show Source Folder" path={sourceDir} />
+      <Action.ShowInFinder path={sourceDir} />
     </ActionPanel>
   );
 
@@ -242,7 +278,7 @@ function PlanView({
     }
     if (e.perceptual) {
       const peers = e.perceptual.peers.map((p) => path.basename(p)).join(", ");
-      out.push(`looks nearly identical to ${peers}`);
+      out.push(`Looks nearly identical to ${peers}`);
     }
     return out;
   }
@@ -254,7 +290,8 @@ function PlanView({
 
   return (
     <List
-      navigationTitle={`Tidy Plan → ${destDir} (${entries.length} files)`}
+      isLoading={executing}
+      navigationTitle={`Tidy Plan (${entries.length} Files)`}
       searchBarPlaceholder={
         smartSummary.length ? `Flagged: ${smartSummary.join(", ")} — still archived normally` : "Filter files…"
       }
@@ -266,7 +303,9 @@ function PlanView({
             return (
               <List.Item
                 key={e.from}
-                title={e.name}
+                // The name it will actually land under — the plan already
+                // resolved " (n)" suffixes for collisions.
+                title={path.basename(e.to)}
                 subtitle={notes.join(" · ")}
                 icon={Icon.Document}
                 accessories={[
@@ -294,8 +333,8 @@ function PlanView({
           {dups.map((e) => (
             <List.Item
               key={e.from}
-              title={e.name}
-              subtitle={`identical to ${e.keeperPath}`}
+              title={path.basename(e.to)}
+              subtitle={`Identical to ${path.basename(e.keeperPath ?? "")}`}
               icon={{ source: Icon.Duplicate, tintColor: Color.Magenta }}
               accessories={[{ text: formatSize(e.size) }]}
               actions={executeAction}
@@ -308,7 +347,7 @@ function PlanView({
           {reviews.map((e) => (
             <List.Item
               key={e.from}
-              title={e.name}
+              title={path.basename(e.to)}
               subtitle={ISSUE_TEXT[e.issue ?? ""] + (e.issue === "corrupt" ? ` (claims to be .${e.issueDetail})` : "")}
               icon={{ source: Icon.ExclamationMark, tintColor: Color.Red }}
               accessories={[{ text: formatSize(e.size) }]}

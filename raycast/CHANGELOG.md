@@ -1,11 +1,18 @@
 # File Tidy Changelog
 
-## [Initial Version] - {PR_MERGE_DATE}
+## [Smart Checks and a Prefixed Archive Structure] - {PR_MERGE_DATE}
 
-- **Tidy Folder**: archive a folder's files into `ft_Category/[Subcategory]/[date]` buckets. Categories come from the file extension; subcategories (Screenshots, Ebooks, Invoices, Installers, …) from configurable name and extension rules. Date depth is per-category — photos and videos by year-month (EXIF capture date when available), documents by year, installers and fonts not by date at all.
-- **Byte-level duplicate detection** (size → head/tail hash → full SHA-256) quarantines identical files instead of archiving them twice, and catches files that duplicate something already in the archive.
+- Archive folders are now named `ft_Category/[Subcategory]/[date]`. The `ft_` prefix keeps tidy's output apart from folders you made yourself; an existing un-prefixed archive is reused rather than split in two. Subcategories (Screenshots, Ebooks, Invoices, Installers, …) come from configurable name and extension rules.
+- Date depth is per-category: photos and videos by year-month (EXIF capture date when available), documents by year, installers and fonts not by date at all.
 - **Near-duplicate detection**: files whose names match once copy markers, source watermarks and date stamps are stripped; the same name in another format; different version numbers of the same release. Flagged in the plan only — these are heuristics, so the files are still archived normally.
 - **Similar-image detection**: perceptual hashing catches bursts, re-exports at another resolution, and messenger-recompressed copies that byte-level hashing cannot see. Flagged in the plan only.
 - **Health checks**: zero-byte files, files whose content doesn't match their extension, and OS junk are moved to a review folder — never deleted.
+- A "Smart checks" toggle in the form turns the three detection passes off for a plain archive-and-dedupe run.
+- The plan now shows the name each file will actually land under, including the ` (n)` suffix added for a collision.
+- Undo only removes folders the run itself created, and refuses to act on a tidy record that is corrupt or points outside the destination.
+
+## [Initial Version] - 2026-07-31
+
+- **Tidy Folder**: archive a folder's files into `Type/Year-Month` buckets (EXIF capture date for photos and videos when available), with byte-level duplicate detection (size → head/tail hash → full SHA-256) that quarantines identical files instead of archiving them twice. Always shows the full plan for confirmation before moving anything.
 - **Undo Last Tidy**: move every file from the last run back to its original location and clean up emptied folders.
-- Always shows the full plan for confirmation before moving anything. Optional in-place mode (category folders inside the source folder), subfolder recursion, a toggle for the smart checks, and a configurable default destination.
+- Optional in-place mode (category folders inside the source folder), subfolder recursion, and a configurable default destination.
