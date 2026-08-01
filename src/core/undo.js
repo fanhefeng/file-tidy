@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { moveFile } from "./move.js";
 
 /**
  * Revert the most recent run by moving every file back.
@@ -11,6 +12,16 @@ import path from "node:path";
  * `message`). Adapters own all user-facing wording.
  */
 export function undoLastRun(destDir) {
+  const run = getLastRun(destDir);
+  return run ? undoRun(destDir, run.manifestPath) : null;
+}
+
+/**
+ * The run that undoLastRun would revert, without reverting it — adapters use
+ * this to describe the run in a confirmation prompt. Throws MANIFEST_CORRUPT
+ * if the record is unreadable or malformed.
+ */
+export function getLastRun(destDir) {
   const runsDir = path.join(destDir, ".tidy", "runs");
   const runs = fs.existsSync(runsDir)
     ? fs
@@ -20,8 +31,25 @@ export function undoLastRun(destDir) {
     : [];
   if (!runs.length) return null;
 
-  const manifestPath = path.join(runsDir, runs.at(-1));
-  const { moves, sourceDir, time } = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  return readRun(path.join(runsDir, runs.at(-1)), destDir);
+}
+
+/**
+ * Revert one specific run. Returns null when the manifest isn't a record under
+ * destDir's own .tidy/runs, or no longer exists (e.g. already undone between
+ * the confirmation prompt and the confirmation).
+ */
+export function undoRun(destDir, manifestPath) {
+  const runsDir = path.resolve(destDir, ".tidy", "runs");
+  const resolvedManifestPath = path.resolve(manifestPath);
+  if (
+    path.relative(path.dirname(resolvedManifestPath), runsDir) !== "" ||
+    !path.basename(resolvedManifestPath).endsWith(".json") ||
+    !fs.existsSync(resolvedManifestPath)
+  ) {
+    return null;
+  }
+  const { moves, sourceDir, time, createdDirs, manifestPath: runManifestPath } = readRun(resolvedManifestPath, destDir);
 
   let restored = 0;
   const failures = [];
@@ -29,9 +57,9 @@ export function undoLastRun(destDir) {
     try {
       if (!fs.existsSync(to)) {
         // The manifest is written before each move, so an entry with nothing at
-        // `to` and the file still at `from` is a move that never happened.
-        if (fs.existsSync(from)) restored++;
-        else failures.push({ from, to, code: "missing" });
+        // `to` and the file still at `from` is a move that never happened —
+        // a no-op for undo, and nothing was restored by it.
+        if (!fs.existsSync(from)) failures.push({ from, to, code: "missing" });
         continue;
       }
       if (fs.existsSync(from)) {
@@ -39,7 +67,7 @@ export function undoLastRun(destDir) {
         continue;
       }
       fs.mkdirSync(path.dirname(from), { recursive: true });
-      fs.renameSync(to, from);
+      moveFile(to, from);
       restored++;
     } catch (err) {
       failures.push({ from, to, code: "error", message: err.message });
@@ -47,28 +75,73 @@ export function undoLastRun(destDir) {
   }
 
   const retired = !failures.length;
-  if (retired) fs.renameSync(manifestPath, `${manifestPath}.undone`);
-  const removedDirs = cleanupEmptyDirs(moves, destDir);
-  return { time, sourceDir, manifestPath, restored, failures, removedDirs, retired };
+  if (retired) fs.renameSync(runManifestPath, `${runManifestPath}.undone`);
+  const removedDirs = cleanupEmptyDirs(createdDirs, destDir);
+  return { time, sourceDir, manifestPath: runManifestPath, restored, failures, removedDirs, retired };
 }
 
 /**
- * After files move back, remove now-empty directories this run had created:
- * walk up from each move target toward destDir, rmdir-ing truly empty dirs.
- * Never touches destDir itself, never deletes files (rmdir fails on non-empty).
+ * Parse and validate a run record. Every path is checked to stay inside the
+ * directories the run declared, so a corrupted or hand-edited manifest can't
+ * make undo write outside sourceDir or delete outside destDir.
  */
-function cleanupEmptyDirs(moves, destDir) {
-  const removed = [];
-  for (const { to } of moves) {
-    let dir = path.dirname(to);
-    while (dir.startsWith(destDir + path.sep)) {
-      if (fs.existsSync(dir)) {
-        if (fs.readdirSync(dir).length) break;
-        fs.rmdirSync(dir);
-        removed.push(dir);
-      }
-      dir = path.dirname(dir);
+function readRun(manifestPath, destDir) {
+  try {
+    const record = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    if (
+      !record ||
+      typeof record !== "object" ||
+      typeof record.time !== "string" ||
+      typeof record.sourceDir !== "string" ||
+      !Array.isArray(record.moves) ||
+      !record.moves.every(
+        (move) =>
+          move &&
+          typeof move === "object" &&
+          typeof move.from === "string" &&
+          path.isAbsolute(move.from) &&
+          isInside(record.sourceDir, move.from) &&
+          typeof move.to === "string" &&
+          path.isAbsolute(move.to) &&
+          isInside(destDir, move.to),
+      ) ||
+      (record.createdDirs !== undefined &&
+        (!Array.isArray(record.createdDirs) ||
+          !record.createdDirs.every((dir) => typeof dir === "string" && isInside(destDir, dir))))
+    ) {
+      throw new Error("The tidy record has an invalid shape");
     }
+    // Records written before createdDirs existed leave the folders behind
+    // rather than guessing which ones this run had created — an empty leftover
+    // folder is cheap, deleting one the user already had is not.
+    return { ...record, createdDirs: record.createdDirs ?? [], manifestPath };
+  } catch (cause) {
+    // code + manifestPath let adapters render this in their own language.
+    const e = new Error(`Invalid tidy record: ${manifestPath}`, { cause });
+    e.code = "MANIFEST_CORRUPT";
+    e.manifestPath = manifestPath;
+    throw e;
+  }
+}
+
+function isInside(parent, child) {
+  const rel = path.relative(path.resolve(parent), path.resolve(child));
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+/**
+ * After files move back, remove the directories this run had created, deepest
+ * first — a folder that already existed before the run is never touched, and
+ * neither is one that still holds anything (the dup manifest keeps Duplicates
+ * around, by design). Never touches destDir itself, never deletes files.
+ */
+function cleanupEmptyDirs(createdDirs, destDir) {
+  const removed = [];
+  const deepestFirst = [...createdDirs].sort((a, b) => b.length - a.length);
+  for (const dir of deepestFirst) {
+    if (dir === destDir || !isInside(destDir, dir) || !fs.existsSync(dir) || fs.readdirSync(dir).length) continue;
+    fs.rmdirSync(dir);
+    removed.push(dir);
   }
   return removed;
 }
