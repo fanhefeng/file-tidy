@@ -8,6 +8,7 @@
 
 **修复**
 
+- **撤销的包含检查能被符号链接绕过**（安全）。`undo.js` 的 `isInside` 只做 `path.resolve` 的词法比较，而 `rename` / `mkdir` / `rmdir` 都会跟着符号链接走。于是一份「每条路径字面上都在 destDir 内」的 manifest——只要中间某段（如 `ft_Images`）是指向外部的符号链接——就能让撤销把 destDir 外的文件搬进 sourceDir，并删掉 destDir 外的空目录，且全程不报任何失败。已实测复现。现在包含检查前先 `canonicalPath` 解析符号链接（`createdDirs` 的清理走同一个检查，一并覆盖）。注意这堵的是检查本身，堵不住竞态：检查通过后、操作发生前被换掉的符号链接仍会被跟随，那需要 `openat`/`O_NOFOLLOW`，Node 的 fs API 不提供。
 - **文件在扫描后消失会中断整次运行**。`scan.js` 此前只在扫描内部跳过 `statSync` 失败的条目，可那个窗口只有几毫秒；真正的窗口在扫描之后——`dedup.js` 要把每个候选文件整个读一遍算 SHA-256，`phash.js` 要解码图片，两步都可能跑几十秒，而它们的 `ENOENT` 会让整次分析白跑。整理 `~/Downloads` 时下载正好完成、临时文件被重命名走，正是这个场景。现在读不了的文件从该轮比对里剔除，其余文件照常分析。`phash.js` 的文档块此前就写着「never fatal: this pass is advisory」，实际并非如此。
 - **配置文件只写一个 `null` 会以裸 TypeError 崩溃**。`null` 是合法 JSON，手工清空配置文件常留下的正是它，而 `loadConfig` 读 `raw.categories` 之前没验证 `raw` 本身。其余标量（`5`、`"abc"`、`[]`）都已经安全，只有 `null` 会炸，且抛的是 core 的内部措辞。现在非对象一律退回默认配置。
 
