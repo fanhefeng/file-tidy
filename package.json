@@ -1,5 +1,5 @@
 {
-  "name": "file-tidy",
+  "name": "@fanhefeng/file-tidy",
   "version": "0.5.2",
   "description": "Organize files into prefixed category folders with byte-level dedup, near-duplicate and similar-image detection, and one-step undo",
   "keywords": [
@@ -29,6 +29,9 @@
     "src",
     "CHANGELOG.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20.12.0"
   },

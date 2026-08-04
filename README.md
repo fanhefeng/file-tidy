@@ -35,6 +35,10 @@
 ### CLI
 
 ```bash
+npm i -g @fanhefeng/file-tidy       # 装完命令名是 tidy
+```
+
+```bash
 tidy ~/Downloads --dest ~/Archive   # 整理到指定目录
 tidy ~/Downloads --in-place         # 就地整理，分类目录建在源文件夹内
 tidy ~/Downloads --dry-run          # 只看计划，不动文件
@@ -44,7 +48,7 @@ tidy undo --dest ~/Archive          # 撤销上一次
 
 不传源文件夹会弹出系统文件夹选择框（macOS 用 osascript，Windows 用 PowerShell，Linux 用 zenity/kdialog）。完整选项见 `tidy --help`。
 
-需要 Node.js >= 20。
+需要 Node.js >= 20.12（CLI 用到的 `node:util` `styleText` 是这个版本才有的）。
 
 ### Raycast 扩展
 
