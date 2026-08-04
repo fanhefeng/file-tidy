@@ -99,7 +99,11 @@ async function hashImage(file) {
 /** { data: Uint8Array (greyscale), width, height } or null. */
 async function decodeGrey(file) {
   if (DIRECT_EXTS.has(file.ext) && file.size <= MAX_DECODE_BYTES) {
-    const direct = decodeBuffer(fs.readFileSync(file.path), file.ext);
+    // Read failures are as advisory as decode failures: the file may simply
+    // have been moved away since the scan, and this pass never justifies
+    // aborting the run.
+    const buf = readOrNull(file.path);
+    const direct = buf && decodeBuffer(buf, file.ext);
     if (direct) return direct;
   }
   // HEIC/RAW/etc, or a JPEG/PNG that failed to decode: try the EXIF thumbnail.
@@ -110,6 +114,14 @@ async function decodeGrey(file) {
     // No thumbnail or unreadable container — give up on this file.
   }
   return null;
+}
+
+function readOrNull(filePath) {
+  try {
+    return fs.readFileSync(filePath);
+  } catch {
+    return null;
+  }
 }
 
 function decodeBuffer(buf, ext) {
@@ -168,7 +180,7 @@ function dHash({ data, width, height }) {
   return hash;
 }
 
-export function hammingDistance(a, b) {
+function hammingDistance(a, b) {
   const diff = a ^ b;
   return popcount32(Number(diff & 0xffffffffn)) + popcount32(Number(diff >> 32n));
 }

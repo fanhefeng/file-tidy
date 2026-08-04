@@ -176,27 +176,43 @@ export function loadConfig() {
     e.configPath = CONFIG_PATH;
     throw e;
   }
+  // JSON.parse happily returns a scalar, and a hand-emptied config file often
+  // holds exactly `null` — which would die on the first property read below.
+  // Anything that isn't an object carries no settings, so fall back to the
+  // defaults rather than making an unusable config fatal.
+  const settings = isPlainObject(raw) ? raw : {};
   const config = {
     ...structuredClone(DEFAULT_CONFIG),
-    ...raw,
+    ...settings,
     _path: CONFIG_PATH,
   };
   // Whole-map settings: a user-supplied value replaces the default outright,
-  // so removing a category/rule in the config actually removes it.
-  if (raw.categories) config.categories = raw.categories;
-  if (raw.subCategories) config.subCategories = raw.subCategories;
+  // so removing a category/rule in the config actually removes it. Only a real
+  // object may replace one — a hand-edited scalar would otherwise wipe every
+  // default and get iterated character by character downstream.
+  if (isPlainObject(settings.categories)) config.categories = settings.categories;
+  if (isPlainObject(settings.subCategories)) config.subCategories = settings.subCategories;
   // Keyed switches: merge, so writing one key doesn't silently reset the rest.
   // `detect: false` is the everything-off shorthand and passes through as-is.
-  config.granularity = { ...DEFAULT_CONFIG.granularity, ...raw.granularity };
-  config.detect = raw.detect === false ? false : { ...DEFAULT_CONFIG.detect, ...raw.detect };
+  config.granularity = { ...DEFAULT_CONFIG.granularity, ...pick(settings.granularity) };
+  config.detect = settings.detect === false ? false : { ...DEFAULT_CONFIG.detect, ...pick(settings.detect) };
   // Because categories replace rather than merge, a config written by an older
   // version silently misses categories added since. Report the gap so adapters
   // can point it out instead of quietly filing those files under Others — but
   // never patch it in: an absent category may well be a deliberate deletion.
-  config._staleCategories = raw.categories
-    ? Object.keys(DEFAULT_CONFIG.categories).filter((c) => !(c in raw.categories))
+  config._staleCategories = isPlainObject(settings.categories)
+    ? Object.keys(DEFAULT_CONFIG.categories).filter((c) => !(c in settings.categories))
     : [];
   return config;
+}
+
+function isPlainObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The value if it can be merged over a defaults object, otherwise nothing. */
+function pick(value) {
+  return isPlainObject(value) ? value : null;
 }
 
 /**
@@ -278,7 +294,10 @@ export function quarantineDirNames(config) {
 export function buildExtIndex(config) {
   const index = new Map();
   for (const [category, exts] of Object.entries(config.categories)) {
-    for (const ext of exts) index.set(ext.toLowerCase().replace(/^\./, ""), category);
+    // A hand-edited category holding a bare string would otherwise be iterated
+    // one character at a time, quietly filling the index with junk extensions.
+    if (!Array.isArray(exts)) continue;
+    for (const ext of exts) index.set(String(ext).toLowerCase().replace(/^\./, ""), category);
   }
   return index;
 }

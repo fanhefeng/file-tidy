@@ -1,4 +1,5 @@
-import type { SourceFile } from "./scan.js";
+import type { Granularity } from "./config.js";
+import type { CompiledSubRule, SourceFile } from "./scan.js";
 import type { DupInfo } from "./dedup.js";
 import type { HealthIssue } from "./health.js";
 import type { SimilarInfo } from "./similar.js";
@@ -28,8 +29,8 @@ export function buildPlan(input: {
   extIndex: Map<string, string>;
   fallbackCategory: string;
   folderName: (base: string) => string;
-  granularity?: Record<string, "month" | "year" | "none">;
-  subIndex?: Map<string, { name: string; test: (file: SourceFile) => boolean }[]>;
+  granularity?: Record<string, Granularity>;
+  subIndex?: Map<string, CompiledSubRule[]>;
   health?: Map<string, HealthIssue>;
   similar?: Map<string, SimilarInfo>;
   perceptual?: Map<string, PerceptualInfo>;

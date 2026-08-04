@@ -21,7 +21,10 @@ const testSrc = path.join(root, "test");
 const testCopy = path.join(root, "raycast", "tests");
 const forkRepo = path.join(os.homedir(), ".config", "raycast", "public-extensions-fork");
 const forkExt = path.join(forkRepo, "extensions", "file-tidy");
-const SKIP = new Set(["node_modules", "dist"]);
+// pnpm-lock.yaml is gitignored here but regenerates whenever pnpm touches
+// raycast/, and the fork mirror is a whole-directory copy — Store CI runs npm
+// and rejects an extension that also carries a pnpm lockfile.
+const SKIP = new Set(["node_modules", "dist", "pnpm-lock.yaml", ".DS_Store"]);
 
 const PAIRS = [
   [coreSrc, coreCopy],
@@ -66,9 +69,9 @@ function mirror(src, dest) {
   fs.cpSync(src, dest, { recursive: true, filter: (p) => !SKIP.has(path.basename(p)) });
 }
 
-/** File names whose presence or content differ between two directories. */
+/** File paths whose presence or content differ between two directories. */
 function diffDirs(a, b) {
-  const names = new Set([...list(a), ...list(b)]);
+  const names = new Set([...listFiles(a), ...listFiles(b)]);
   return [...names]
     .filter((name) => {
       const fa = path.join(a, name);
@@ -79,6 +82,19 @@ function diffDirs(a, b) {
     .sort();
 }
 
-function list(dir) {
-  return fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+/**
+ * Every file under dir, relative to it. Recursive and skipping the same names
+ * mirror() does, so the two agree on what "in sync" means — a flat listing
+ * would miss drift inside a subdirectory and die with EISDIR on the directory.
+ */
+function listFiles(dir, prefix = "") {
+  if (!fs.existsSync(dir)) return [];
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (SKIP.has(entry.name)) continue;
+    const rel = prefix ? path.join(prefix, entry.name) : entry.name;
+    if (entry.isDirectory()) out.push(...listFiles(path.join(dir, entry.name), rel));
+    else out.push(rel);
+  }
+  return out;
 }

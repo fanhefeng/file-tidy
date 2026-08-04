@@ -21,6 +21,7 @@ import { analyze, type AnalyzeCounts, type Phase } from "./core/analyze.js";
 import { canonicalPath, isInsideDir, loadConfig } from "./core/config.js";
 import { executePlan } from "./core/execute.js";
 import { bucketLabel, formatSize, type PlanEntry } from "./core/plan.js";
+import { describeError } from "./errors.js";
 
 interface FormValues {
   source: string[];
@@ -133,9 +134,10 @@ export default function TidyFolderCommand() {
       }
       push(<PlanView entries={entries} counts={counts} sourceDir={sourceDir} destDir={destDir} />);
     } catch (err) {
+      const { title, message } = describeError(err, "Scan failed");
       toast.style = Toast.Style.Failure;
-      toast.title = "Scan failed";
-      toast.message = err instanceof Error ? err.message : String(err);
+      toast.title = title;
+      toast.message = message;
     } finally {
       setLoading(false);
     }
@@ -215,7 +217,9 @@ function PlanView({
   const byBucket = new Map<string, PlanEntry[]>();
   for (const e of archives) {
     const bucket = bucketLabel(e, destDir);
-    byBucket.set(bucket, [...(byBucket.get(bucket) ?? []), e]);
+    const items = byBucket.get(bucket);
+    if (items) items.push(e);
+    else byBucket.set(bucket, [e]);
   }
 
   async function execute() {
@@ -248,13 +252,13 @@ function PlanView({
     } catch (err) {
       // The plan is built before the confirmation, so a failure here can land
       // before the progress toast exists.
-      const message = err instanceof Error ? err.message : String(err);
+      const { title, message } = describeError(err, "Tidy failed");
       if (toast) {
         toast.style = Toast.Style.Failure;
-        toast.title = "Tidy failed";
+        toast.title = title;
         toast.message = message;
       } else {
-        await showToast({ style: Toast.Style.Failure, title: "Tidy failed", message });
+        await showToast({ style: Toast.Style.Failure, title, message });
       }
     } finally {
       executingRef.current = false;
@@ -348,7 +352,10 @@ function PlanView({
             <List.Item
               key={e.from}
               title={path.basename(e.to)}
-              subtitle={ISSUE_TEXT[e.issue ?? ""] + (e.issue === "corrupt" ? ` (claims to be .${e.issueDetail})` : "")}
+              subtitle={
+                (ISSUE_TEXT[e.issue ?? ""] ?? e.issue) +
+                (e.issue === "corrupt" ? ` (claims to be .${e.issueDetail})` : "")
+              }
               icon={{ source: Icon.ExclamationMark, tintColor: Color.Red }}
               accessories={[{ text: formatSize(e.size) }]}
               actions={executeAction}

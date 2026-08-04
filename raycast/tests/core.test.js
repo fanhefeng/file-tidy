@@ -81,6 +81,27 @@ test("quarantines a new file that duplicates one already archived in the destina
   assert.equal(entries[0].keeperPath, kept);
 });
 
+test("a file that vanishes between the scan and the hashing drops out instead of aborting dedup", async () => {
+  const src = tmp();
+  write(src, "a.txt", "same");
+  write(src, "b.txt", "same");
+  // Same size as each other, so they reach the hashing rather than being
+  // separated by the size prefilter.
+  write(src, "gone.txt", "vanishing");
+  write(src, "gone-twin.txt", "vanishing");
+  const sourceFiles = scanSource(src);
+  // A download finishing mid-run renames its temp file away exactly like this.
+  fs.unlinkSync(path.join(src, "gone.txt"));
+
+  const duplicates = await findDuplicates(sourceFiles, []);
+  // The intact pair is still judged normally…
+  assert.equal(duplicates.size, 1);
+  assert.ok(duplicates.has(path.join(src, "b.txt")));
+  // …and the survivor of the vanished pair is never called a duplicate of a
+  // file that isn't there any more.
+  assert.ok(!duplicates.has(path.join(src, "gone-twin.txt")));
+});
+
 test("undo restores every file, clears emptied folders, retires the manifest, then returns null", async () => {
   const src = tmp();
   const dest = tmp();
@@ -159,16 +180,15 @@ test("rejects category and sub-category names that escape the destination", asyn
   const now2 = new Date();
   const sourceFiles = [{ path: "/source/a.txt", name: "a.txt", ext: "txt", size: 1, birthtime: now2, mtime: now2 }];
   const base = { sourceFiles, duplicates: new Map(), destDir: "/archive", fallbackCategory: "Others" };
+  // The code carries the phrasing to the adapters; the raw message is core's own
+  const rejected = (label) => (err) => err.code === "INVALID_SEGMENT" && err.label === label;
 
   await assert.rejects(
     buildPlan({ ...base, extIndex: new Map([["txt", "../../outside"]]), folderName: (b) => b }),
-    /Invalid category name/,
+    rejected("category"),
   );
   // The prefix comes from the config too, and is caught on the first folder built
-  await assert.rejects(
-    buildPlan({ ...base, extIndex, folderName: (b) => `../${b}` }),
-    /Invalid duplicates folder name/,
-  );
+  await assert.rejects(buildPlan({ ...base, extIndex, folderName: (b) => `../${b}` }), rejected("duplicates folder"));
   await assert.rejects(
     buildPlan({
       ...base,
@@ -176,7 +196,7 @@ test("rejects category and sub-category names that escape the destination", asyn
       folderName: (b) => b,
       subIndex: new Map([["Documents", [{ name: "../escape", test: () => true }]]]),
     }),
-    /Invalid sub-category name/,
+    rejected("sub-category"),
   );
 });
 

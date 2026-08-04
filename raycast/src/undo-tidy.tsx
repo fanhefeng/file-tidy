@@ -13,6 +13,7 @@ import {
 import { useRef, useState } from "react";
 import { canonicalPath } from "./core/config.js";
 import { getLastRun, undoRun } from "./core/undo.js";
+import { describeError } from "./errors.js";
 
 export default function UndoTidyCommand() {
   const { defaultDest } = getPreferenceValues<Preferences.UndoTidy>();
@@ -73,9 +74,7 @@ export default function UndoTidyCommand() {
           "(already moved, or a name clash at the original spot). The record is kept — you can retry.";
       }
     } catch (err) {
-      const code = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
-      const title = code === "MANIFEST_CORRUPT" ? "Invalid tidy record" : "Undo failed";
-      const message = err instanceof Error ? err.message : String(err);
+      const { title, message } = describeError(err, "Undo failed");
       if (toast) {
         toast.style = Toast.Style.Failure;
         toast.title = title;

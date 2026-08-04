@@ -137,6 +137,7 @@ function reserveTarget(target, reserved) {
 /**
  * A single folder name, not a path fragment that could climb out of destDir or
  * take over tidy's own bookkeeping folder.
+ * code + label + segment let adapters render this in their own language.
  */
 function validSegment(segment, label) {
   const normalized = typeof segment === "string" ? segment.toLowerCase() : "";
@@ -150,7 +151,11 @@ function validSegment(segment, label) {
     path.basename(segment) !== segment ||
     normalized === ".tidy"
   ) {
-    throw new Error(`Invalid ${label} name: ${String(segment)}`);
+    const e = new Error(`Invalid ${label} name: ${String(segment)}`);
+    e.code = "INVALID_SEGMENT";
+    e.label = label;
+    e.segment = String(segment);
+    throw e;
   }
   return segment;
 }

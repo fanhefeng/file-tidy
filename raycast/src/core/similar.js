@@ -1,6 +1,14 @@
 import path from "node:path";
 
 /**
+ * The shared keeper policy for size-based passes: the largest copy is the best
+ * source (least recompressed, fullest scan). `sizeOf` adapts item shapes.
+ */
+export function pickLargest(items, sizeOf = (f) => f.size) {
+  return items.reduce((a, b) => (sizeOf(b) > sizeOf(a) ? b : a));
+}
+
+/**
  * Near-duplicate detection: files that are almost certainly the same thing but
  * not byte-identical, so findDuplicates() can never see them. Three passes:
  *
@@ -18,14 +26,6 @@ import path from "node:path";
  * Returns Map<path, { reason, peers: string[], best: boolean }> where `best`
  * marks the copy this module would keep.
  */
-/**
- * The shared keeper policy for size-based passes: the largest copy is the best
- * source (least recompressed, fullest scan). `sizeOf` adapts item shapes.
- */
-export function pickLargest(items, sizeOf = (f) => f.size) {
-  return items.reduce((a, b) => (sizeOf(b) > sizeOf(a) ? b : a));
-}
-
 export function findSimilar(files) {
   const flagged = new Map();
   // A file already grouped by an earlier (more specific) pass isn't regrouped.

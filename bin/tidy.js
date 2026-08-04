@@ -33,7 +33,9 @@ year, installers not by date at all; all of it is configurable.
 Config: ~/.config/tidy/config.json`;
 
 // ---------- Copy: core returns codes only, every phrasing lives here ----------
-// Declared above main() so the handlers it registers can't hit the TDZ.
+// Every table must stay above the main() call below. main() runs during module
+// evaluation and `tidy undo --dest <dir>` reaches the reporting code without
+// ever awaiting, so a table declared further down is still in its TDZ by then.
 
 const PHASE_TEXT = {
   scanning: () => "Scanning files…",
@@ -54,6 +56,11 @@ const SIMILAR_TEXT = {
   versioned: "another version of the same release",
   "normalized-name": "the same thing under a different name",
   "same-stem": "the same name in another format",
+};
+
+const UNDO_FAILURE_TEXT = {
+  missing: "the archived file is no longer there",
+  occupied: "the original location is taken",
 };
 
 main().catch((err) => {
@@ -178,6 +185,8 @@ function formatError(err) {
       return `Cross-volume copy verification failed: ${err.path}`;
     case "MANIFEST_CORRUPT":
       return `This tidy record is unusable, so it can't be undone (${err.manifestPath}): ${err.cause?.message ?? ""}`;
+    case "INVALID_SEGMENT":
+      return `The ${err.label} name from your config is not a plain folder name: "${err.segment}"`;
     default:
       return err.message;
   }
@@ -265,11 +274,6 @@ function hints(entry) {
   return out;
 }
 
-const UNDO_FAILURE_TEXT = {
-  missing: "the archived file is no longer there",
-  occupied: "the original location is taken",
-};
-
 function reportUndo(result, destDir) {
   if (!result) {
     console.log("No tidy run to undo.");
@@ -305,7 +309,9 @@ function reportUndo(result, destDir) {
 function reportLeftover(destDir) {
   if (!fs.existsSync(destDir)) return;
   const leftover = fs.readdirSync(destDir).filter((n) => n !== ".DS_Store");
-  if (!leftover.length || leftover.every((n) => n === ".tidy")) {
+  if (!leftover.length) {
+    console.log(`${destDir} is empty now — delete it yourself if you don't need it.`);
+  } else if (leftover.every((n) => n === ".tidy")) {
     console.log(`${destDir} now holds nothing but the .tidy records — delete it yourself if you don't need them.`);
   }
 }

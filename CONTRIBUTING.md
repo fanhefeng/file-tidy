@@ -15,7 +15,7 @@ test/            核心逻辑测试（node:test）
 
 三条不可破的约定：
 
-1. **core 不说话。** 它只返回数据，出错时抛带 `code` 的错误（`CONFIG_PARSE`、`EXDEV_VERIFY`、`MANIFEST_CORRUPT`…），措辞归适配层。新增错误码时**两个适配层都要补上对应文案**，否则 core 的原始英文会直接漏给用户。
+1. **core 不说话。** 它只返回数据，出错时抛带 `code` 的错误（`CONFIG_PARSE`、`INVALID_SEGMENT`、`EXDEV_VERIFY`、`MANIFEST_CORRUPT`），措辞归适配层。文案只有两处：CLI 的 `formatError`（`bin/tidy.js`）和扩展的 `describeError`（`raycast/src/errors.ts`）。**新增错误码时两处都要补**，否则 core 的原始英文会直接漏给用户。core 里任何 `throw` 都必须带 `code`，裸 `new Error` 等于绕过这条约定。
 2. **`plan.js` 是唯一决定文件去向的地方。** 不要在别处拼目标路径。新增检测请加进 `analyze.js` 的编排，以 Map 形式喂给 `buildPlan`。
 3. **生成物不手改。** `raycast/src/core/` 和 `raycast/tests/` 改了也会被下一次 sync 覆盖，`pnpm test` 会检出漂移并失败。
 

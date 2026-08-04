@@ -16,7 +16,6 @@ export function hashImages(
 ): Promise<Map<string, bigint>>;
 export function loadHashCache(destDir: string): Map<string, HashCacheEntry>;
 export function saveHashCache(destDir: string, cache: Map<string, HashCacheEntry>, files: SourceFile[]): void;
-export function hammingDistance(a: bigint, b: bigint): number;
 export function clusterByHash(
   hashes: Map<string, bigint>,
   filesByPath: Map<string, SourceFile>,

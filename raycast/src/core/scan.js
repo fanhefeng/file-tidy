@@ -28,13 +28,24 @@ function walk(dir, out, recursive, excludeDirs, includeJunk) {
       continue;
     }
     if (!entry.isFile()) continue;
-    out.push(toSourceFile(full, entry.name));
+    const file = toSourceFile(full, entry.name);
+    if (file) out.push(file);
   }
 }
 
-/** The one place the file record shape is built — walk and scanDest drifted apart when each spelled it out. */
+/**
+ * The one place the file record shape is built — walk and scanDest drifted
+ * apart when each spelled it out. Returns null when the entry is gone or
+ * unreadable by the time it's stat'ed: a browser finishing a download renames
+ * its temp file mid-scan, and that must not abort the scan of everything else.
+ */
 function toSourceFile(full, name) {
-  const stat = fs.statSync(full);
+  let stat;
+  try {
+    stat = fs.statSync(full);
+  } catch {
+    return null;
+  }
   return {
     path: full,
     name,
@@ -67,7 +78,8 @@ export function scanDest(destDir, { onlyDirs, skipDirs } = {}) {
       walk(full, files, true);
     } else if (entry.isFile()) {
       if (onlyDirs) continue;
-      files.push(toSourceFile(full, entry.name));
+      const file = toSourceFile(full, entry.name);
+      if (file) files.push(file);
     }
   }
   return files;
@@ -90,12 +102,13 @@ export function classify(file, extIndex, fallbackCategory) {
 export function buildSubIndex(subCategories = {}) {
   const index = new Map();
   for (const [category, rules] of Object.entries(subCategories)) {
+    if (!Array.isArray(rules)) continue;
     const compiled = [];
     for (const rule of rules) {
       if (!rule?.name) continue;
-      const exts = new Set((rule.exts ?? []).map((e) => e.toLowerCase().replace(/^\./, "")));
+      const exts = new Set(list(rule.exts).map((e) => String(e).toLowerCase().replace(/^\./, "")));
       const patterns = [];
-      for (const src of rule.match ?? []) {
+      for (const src of list(rule.match)) {
         try {
           patterns.push(new RegExp(src, "i"));
         } catch {
@@ -111,6 +124,11 @@ export function buildSubIndex(subCategories = {}) {
     if (compiled.length) index.set(category, compiled);
   }
   return index;
+}
+
+/** A hand-edited rule can hold anything; only a real list is worth iterating. */
+function list(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 /** First matching sub-rule for the file's category, or null. */

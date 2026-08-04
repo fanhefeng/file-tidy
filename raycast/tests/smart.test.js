@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import jpeg from "jpeg-js";
 import { analyze } from "../src/core/analyze.js";
-import { buildFolderNamer, organizedDirNames } from "../src/core/config.js";
+import { buildExtIndex, buildFolderNamer, organizedDirNames } from "../src/core/config.js";
 import { executePlan } from "../src/core/execute.js";
 import { checkHealth } from "../src/core/health.js";
 import { clusterByHash, hashImages, loadHashCache, saveHashCache } from "../src/core/phash.js";
@@ -187,6 +187,40 @@ test("subcategories: an unparsable regex is dropped, the rest of the rule still 
   const index = buildSubIndex({ Documents: [{ name: "X", match: ["([bad"], exts: ["epub"] }] });
   const file = { name: "a.epub", ext: "epub" };
   assert.equal(subClassify(file, "Documents", index), "X");
+});
+
+test("hand-edited config: a value that should be a list is ignored, never iterated character by character", () => {
+  // "jpg" instead of ["jpg"] must not register j/p/g as three extensions
+  const index = buildExtIndex({ categories: { Images: "jpg", Documents: ["txt"] } });
+  assert.equal(index.get("txt"), "Documents");
+  assert.equal(index.has("j"), false);
+  // A non-list rule set used to throw "is not iterable" straight at the user
+  assert.equal(buildSubIndex({ Documents: 5, Images: [{ name: "Shots", exts: ["png"] }] }).size, 1);
+});
+
+test("hand-edited config: a file holding nothing but null falls back to the defaults", async () => {
+  const home = tmp();
+  const cfgPath = path.join(home, "tidy", "config.json");
+  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+  // Valid JSON carrying no settings — what emptying the file by hand tends to
+  // leave behind. Every property read used to die on it with a bare TypeError.
+  fs.writeFileSync(cfgPath, "null");
+
+  // config.js resolves its path at module load, so run a child process with a patched XDG_CONFIG_HOME
+  const { execFileSync } = await import("node:child_process");
+  const script = `
+    import { loadConfig } from ${JSON.stringify(new URL("../src/core/config.js", import.meta.url).href)};
+    const c = loadConfig();
+    console.log(JSON.stringify({ cats: Object.keys(c.categories), prefix: c.folderPrefix, stale: c._staleCategories }));
+  `;
+  const out = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+    env: { ...process.env, XDG_CONFIG_HOME: home },
+    encoding: "utf8",
+  });
+  const { cats, prefix, stale } = JSON.parse(out.trim().split("\n").pop());
+  assert.ok(cats.includes("Images"));
+  assert.equal(prefix, "ft_");
+  assert.deepEqual(stale, []); // nothing was configured, so nothing is missing
 });
 
 // ---------- Near-duplicates ----------
@@ -435,6 +469,21 @@ test("phash: an undecodable file is skipped rather than fatal", async () => {
   const broken = write(dir, "broken.jpg", "not a jpeg at all");
   const hashes = await hashImages([{ path: broken, name: "broken.jpg", ext: "jpg", size: 17 }]);
   assert.equal(hashes.size, 0);
+});
+
+test("phash: an image that vanishes between the scan and the decoding is skipped, not fatal", async () => {
+  const dir = tmp();
+  const kept = makeJpeg(dir, "kept.jpg", { width: 64, height: 64, quality: 90 });
+  const gone = write(dir, "gone.jpg", "placeholder");
+  const files = [
+    { path: kept, name: "kept.jpg", ext: "jpg", size: fs.statSync(kept).size },
+    { path: gone, name: "gone.jpg", ext: "jpg", size: 11 },
+  ];
+  fs.unlinkSync(gone);
+
+  const hashes = await hashImages(files);
+  assert.equal(hashes.size, 1); // the surviving image was still hashed
+  assert.ok(hashes.has(kept));
 });
 
 test("phash: flagged only, the destination is unchanged", async () => {
