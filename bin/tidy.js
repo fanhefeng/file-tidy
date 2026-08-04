@@ -187,6 +187,8 @@ function formatError(err) {
       return `This tidy record is unusable, so it can't be undone (${err.manifestPath}): ${err.cause?.message ?? ""}`;
     case "INVALID_SEGMENT":
       return `The ${err.label} name from your config is not a plain folder name: "${err.segment}"`;
+    case "TIDY_DIR_ESCAPES":
+      return `The .tidy folder in ${err.destDir} is a link pointing outside it, so tidy won't read or write its records there`;
     default:
       return err.message;
   }
