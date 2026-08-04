@@ -1,6 +1,6 @@
 {
   "name": "file-tidy",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Organize files into prefixed category folders with byte-level dedup, near-duplicate and similar-image detection, and one-step undo",
   "keywords": [
     "cli",
@@ -24,8 +24,13 @@
   "bin": {
     "tidy": "bin/tidy.js"
   },
+  "files": [
+    "bin",
+    "src",
+    "CHANGELOG.md"
+  ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20.12.0"
   },
   "packageManager": "pnpm@11.5.1",
   "scripts": {

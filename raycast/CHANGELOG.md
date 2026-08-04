@@ -10,6 +10,8 @@
 - A "Smart checks" toggle in the form turns the three detection passes off for a plain archive-and-dedupe run.
 - The plan now shows the name each file will actually land under, including the ` (n)` suffix added for a collision.
 - Undo only removes folders the run itself created, and refuses to act on a tidy record that is corrupt or points outside the destination.
+- Failures now explain themselves: an unparsable config file, a folder name in the config that isn't a plain name, and a failed cross-volume copy each say what went wrong instead of surfacing an internal message.
+- A file that disappears mid-run — a download finishing and its temp file being renamed away, say — no longer aborts the scan. It drops out of that comparison and everything else is still analyzed.
 
 ## [Initial Version] - 2026-07-31
 

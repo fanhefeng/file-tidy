@@ -2,6 +2,30 @@
 
 本文件记录整个项目（CLI + Raycast 扩展）的变更。`raycast/CHANGELOG.md` 是给 Raycast Store 用的另一份，只记面向扩展用户的变更。
 
+## [0.5.2] - 2026-08-04
+
+两轮全量 code review 的修复。
+
+**修复**
+
+- **文件在扫描后消失会中断整次运行**。`scan.js` 此前只在扫描内部跳过 `statSync` 失败的条目，可那个窗口只有几毫秒；真正的窗口在扫描之后——`dedup.js` 要把每个候选文件整个读一遍算 SHA-256，`phash.js` 要解码图片，两步都可能跑几十秒，而它们的 `ENOENT` 会让整次分析白跑。整理 `~/Downloads` 时下载正好完成、临时文件被重命名走，正是这个场景。现在读不了的文件从该轮比对里剔除，其余文件照常分析。`phash.js` 的文档块此前就写着「never fatal: this pass is advisory」，实际并非如此。
+- **配置文件只写一个 `null` 会以裸 TypeError 崩溃**。`null` 是合法 JSON，手工清空配置文件常留下的正是它，而 `loadConfig` 读 `raw.categories` 之前没验证 `raw` 本身。其余标量（`5`、`"abc"`、`[]`）都已经安全，只有 `null` 会炸，且抛的是 core 的内部措辞。现在非对象一律退回默认配置。
+
+- **`tidy undo --dest <目录>` 在部分撤销时会崩溃**。只要有文件没能还原，打印失败原因的那一步就抛 `ReferenceError`：`main()` 在模块求值期间就被调用，而这条路径全程不 `await`，等它跑到失败分支时文案表还在 TDZ 里。结果是用户看到「N 个失败」却永远看不到失败原因。文案表已挪到调用点之前。
+- **core 不再漏出原始英文**。`plan.js` 的路径校验此前抛的是不带 `code` 的裸错误，违反「core 不说话」的约定；现在带 `INVALID_SEGMENT`，CLI 和扩展各自有文案。
+- **Raycast 扩展补上错误码文案映射**。此前它把 `err.message` 直接打给用户，`CONFIG_PARSE` / `EXDEV_VERIFY` / `INVALID_SEGMENT` 全部漏的是 core 的内部措辞。新增 `raycast/src/errors.ts`，两个命令共用。
+- **手改坏的配置不再以 TypeError 崩溃**。`categories: {Images: "jpg"}`（漏了方括号）此前会把 j/p/g 当成三个扩展名，`subCategories: {Documents: 5}` 直接抛「5 is not iterable」。现在非列表的值一律忽略，非对象也不能替换掉整份默认值。
+- **扫描期间文件消失不再中断整次扫描**。整理 `~/Downloads` 时浏览器正好完成下载并重命名临时文件，`statSync` 的 `ENOENT` 会让整个扫描失败；现在跳过该条目。
+- `pnpm sync:fork` 不再把 `raycast/pnpm-lock.yaml` 带进 Store fork —— 它被 gitignore 了，但 fork 镜像是整目录复制，而 Store CI 只认 npm。
+- `pnpm sync --check` 的目录比对改为递归：此前只比对顶层，子目录里的漂移检不出来，而且会以 EISDIR 崩掉。
+
+**清理**
+
+- 删掉死接口 `hammingDistance`（导出且写进 `.d.ts`，但两个适配层和测试都不用）。
+- `similar.js` 的模块文档块此前错位挂在 `pickLargest` 上，实际描述的是 `findSimilar`。
+- `plan.d.ts` 里重复抄写的 `Granularity` 与 `CompiledSubRule` 改为引用既有类型。
+- 根 `package.json` 补 `files` 字段（此前 `npm publish` 会把 `raycast/`、`test/`、`scripts/` 一起打包），`engines` 从 `>=20` 收紧到 `>=20.12.0`——CLI 用的 `node:util` `styleText` 是 20.12 才有的。
+
 ## [0.5.1] - 2026-08-01
 
 回流 Raycast 官方维护者在合并 PR #29437 前推的加固改动，并把同类问题在 CLI 侧一并修掉。附带一轮项目规范化。
