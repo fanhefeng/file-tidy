@@ -37,7 +37,7 @@
   },
   "packageManager": "pnpm@11.5.1",
   "scripts": {
-    "test": "node --test test/core.test.js test/smart.test.js && node scripts/sync.js --check",
+    "test": "node --test test/*.test.js && node scripts/sync.js --check",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "sync": "node scripts/sync.js",
