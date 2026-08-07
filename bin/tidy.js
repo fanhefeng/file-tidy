@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { parseArgs, styleText } from "node:util";
 import { analyze } from "../src/core/analyze.js";
-import { canonicalPath, expandTilde, isInsideDir, loadConfig } from "../src/core/config.js";
+import { TIDY_DIR, canonicalPath, isInsideDir, loadConfig } from "../src/core/config.js";
 import { executePlan } from "../src/core/execute.js";
 import { bucketLabel, formatSize } from "../src/core/plan.js";
 import { undoLastRun } from "../src/core/undo.js";
@@ -313,12 +314,21 @@ function reportLeftover(destDir) {
   const leftover = fs.readdirSync(destDir).filter((n) => n !== ".DS_Store");
   if (!leftover.length) {
     console.log(`${destDir} is empty now — delete it yourself if you don't need it.`);
-  } else if (leftover.every((n) => n === ".tidy")) {
+  } else if (leftover.every((n) => n === TIDY_DIR)) {
     console.log(`${destDir} now holds nothing but the .tidy records — delete it yourself if you don't need them.`);
   }
 }
 
 // ---------- Interaction ----------
+
+/** `~` shorthand appears in --dest, positionals and the config; pickers and prompts return real paths. */
+function expandTilde(p) {
+  if (p === "~") return os.homedir();
+  if (p.startsWith("~/") || (process.platform === "win32" && p.startsWith("~\\"))) {
+    return path.join(os.homedir(), p.slice(2));
+  }
+  return p;
+}
 
 /** Native folder picker: osascript / PowerShell / zenity·kdialog by platform. */
 function pickFolder() {
