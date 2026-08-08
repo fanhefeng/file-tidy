@@ -2,6 +2,26 @@
 
 本文件记录整个项目（CLI + Raycast 扩展）的变更。`raycast/CHANGELOG.md` 是给 Raycast Store 用的另一份，只记面向扩展用户的变更。
 
+## [未发布]
+
+一次纯内部整理，两端的用户可见行为都没有变化。扩展侧已随 Store 的 `Maintenance` 条目发布（PR #30078，2026-08-08 合并），CLI 侧等下次发版。
+
+**重构**
+
+- **`" (n)"` 碰撞后缀改为单点定义**。`plan.js` 的 `reserveTarget` 和 `execute.js` 的 `resolveCollision` 此前各有一份生成后缀的循环，区别只在「是否空闲」的判定（计划期查预留表 + 磁盘，执行期查磁盘）。两份格式必须永远一致，否则计划预览里显示的名字会和真正落盘的名字分叉。现在抽出 `plan.js` 的 `firstFreeName(target, isFree)`，判定作为回调传入，两边共用同一个后缀生成器。
+- **逻辑里的 `".tidy"` 字面量换成 `TIDY_DIR` 常量**：`analyze.js` 的 `skipDirs`、`plan.js` 的 `validSegment`、CLI 的残留检查三处。面向用户的文案仍保留字面写法。`TIDY_DIR` 与 `tidyPath` 补进 `config.d.ts`。
+- **补上缺失的 `date.d.ts`**，现在每个 core 模块都有对应的类型声明。
+- **`expandTilde` 从 core 移进 CLI**。选择框和表单交给 core 的永远是绝对路径，core 不再为单个适配层导出辅助函数。
+
+**测试**
+
+- **临时目录终于会被清理**。测试用 `mkdtemp` 建目录却从不删，CONTRIBUTING 里写着会清理，实际系统 tmpdir 已经堆了几千个残留。现在统一登记，在 `after()` 里删干净。
+- **测试脚本从逐个列文件改成 `test/*.test.js`**，新增的测试文件不会再被静默跳过。glob 故意不加引号：unix 由 shell 展开，Windows 靠 node 21+ 自带的 glob 支持。不能直接传目录——node 22+ 把 `--test` 的位置参数当 glob，会把目录路径当脚本执行。
+
+**文档**
+
+- `CLAUDE.md` 扩写成完整的项目导览；`CONTRIBUTING.md` 更正 Store 提交流程（每次新开 `ext/file-tidy-*` 分支，合并后由 Raycast 删除），并记下 fork 检出的坑。
+
 ## [0.5.2] - 2026-08-04
 
 两轮全量 code review 的修复。
