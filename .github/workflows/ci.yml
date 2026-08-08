@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every version's result: a failure specific to the engines floor
+      # is exactly what this matrix exists to catch.
+      fail-fast: false
+      matrix:
+        # 20.12 is the engines floor (the CLI uses node:util styleText, added
+        # there); 24 is current.
+        node: ["20.12", "22", "24"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Also runs scripts/sync.js --check, which fails when raycast/src/core or
+      # raycast/tests have drifted from the originals they are generated from.
+      - run: pnpm test
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+
+  raycast:
+    name: raycast (ray lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: raycast/package-lock.json
+      # The extension directory is self-contained and has its own lockfile:
+      # Store CI runs npm there, so this side must not go through pnpm.
+      - run: npm ci
+        working-directory: raycast
+      # The same check the Store runs on a submission. Catching it here means a
+      # lint failure never reaches the fork.
+      - run: npm run lint
+        working-directory: raycast

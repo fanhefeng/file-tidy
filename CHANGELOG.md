@@ -18,9 +18,13 @@
 - **临时目录终于会被清理**。测试用 `mkdtemp` 建目录却从不删，CONTRIBUTING 里写着会清理，实际系统 tmpdir 已经堆了几千个残留。现在统一登记，在 `after()` 里删干净。
 - **测试脚本从逐个列文件改成 `test/*.test.js`**，新增的测试文件不会再被静默跳过。glob 故意不加引号：unix 由 shell 展开，Windows 靠 node 21+ 自带的 glob 支持。不能直接传目录——node 22+ 把 `--test` 的位置参数当 glob，会把目录路径当脚本执行。
 
+**CI**
+
+- **补上 GitHub Actions**（此前完全没有，`pnpm test` 和 `sync --check` 全靠本地手跑）。推 `main` 和开 PR 时跑三个 job：`test` 在 Node 20.12 / 22 / 24 三个版本上跑测试——20.12 是 `engines` 下限，这一步同时校验 Raycast 副本未漂移，**改了 `src/core/` 忘记 `pnpm sync` 会在这里被拦下**；`format` 跑 Prettier 检查；`raycast` 跑 `ray lint`，也就是 Store 提交时跑的同一个检查，让 lint 失败止步于本仓库而不是流到 fork。
+
 **文档**
 
-- `CLAUDE.md` 扩写成完整的项目导览；`CONTRIBUTING.md` 更正 Store 提交流程（每次新开 `ext/file-tidy-*` 分支，合并后由 Raycast 删除），并记下 fork 检出的坑。
+- `CLAUDE.md` 扩写成完整的项目导览；`CONTRIBUTING.md` 更正 Store 提交流程（每次新开 `ext/file-tidy-*` 分支，合并后由 Raycast 删除），记下 fork 检出的坑，并补上 CI 说明。
 
 ## [0.5.2] - 2026-08-04
 

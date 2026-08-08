@@ -74,6 +74,18 @@ pnpm test        # 跑测试 + 校验 raycast 副本未漂移
 
 涉及文件移动的测试一律在 `os.tmpdir()` 下建临时目录，用完删干净。
 
+### CI
+
+`.github/workflows/ci.yml` 在推 `main` 和开 PR 时跑三个 job：
+
+| job       | 内容                                       | 为什么                                                                                                                                                    |
+| --------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test`    | `pnpm test`，Node 20.12 / 22 / 24 三个版本 | 20.12 是 `engines` 下限（CLI 用的 `node:util` `styleText` 是那时加的）。这一步同时跑 `sync --check`，**改了 `src/core/` 忘记 `pnpm sync` 会在这里被拦下** |
+| `format`  | `pnpm format:check`                        | 保证仓库始终是 Prettier 格式，避免格式改动混进功能 diff                                                                                                   |
+| `raycast` | `raycast/` 下 `npm ci` + `npm run lint`    | 跟 Store 提交时跑的是同一个 `ray lint`，让 lint 失败止步于本仓库，不流到 fork                                                                             |
+
+`raycast` job 用 npm 而不是 pnpm——扩展目录自包含、有自己的 `package-lock.json`，Store CI 也只认 npm。
+
 ## 提交到 Raycast Store
 
 ### 流程
