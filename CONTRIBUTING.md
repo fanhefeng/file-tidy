@@ -16,6 +16,7 @@ test/            核心逻辑测试（node:test）
 三条不可破的约定：
 
 1. **core 不说话。** 它只返回数据，出错时抛带 `code` 的错误（`CONFIG_PARSE`、`INVALID_SEGMENT`、`TIDY_DIR_ESCAPES`、`EXDEV_VERIFY`、`MANIFEST_CORRUPT`），措辞归适配层。文案只有两处：CLI 的 `formatError`（`bin/tidy.js`）和扩展的 `describeError`（`raycast/src/errors.ts`）。**新增错误码时两处都要补**，否则 core 的原始英文会直接漏给用户。core 里任何 `throw` 都必须带 `code`，裸 `new Error` 等于绕过这条约定。
+   - 唯一不抛的错误码是 `REPORT_WRITE`：它只描述**最后一个文件移动完成之后**的追加写失败（`ft_Duplicates/manifest.md` 与 `.tidy/similar.md`）。这时丢的是记录不是文件，抛出去会把一次已经完成的归档报成失败，还会诱使用户在已经搬空的源目录上重试。所以它走 `executePlan` 返回值里的 `reportErrors`，由适配层当**警告**呈现——同样两处都要有文案。
 2. **`plan.js` 是唯一决定文件去向的地方。** 不要在别处拼目标路径。新增检测请加进 `analyze.js` 的编排，以 Map 形式喂给 `buildPlan`。
    - 与之配套：**判断路径是否在某个目录内，必须先 `canonicalPath` 两端**（`isInsideDir` 的注释写着这条前提）。只比较字符串会被中间某段的符号链接绕过——`undo.js` 曾经栽在这里。`.tidy` 下的任何路径一律走 `tidyPath()`，不要自己 `path.join(destDir, ".tidy", …)`。
 3. **生成物不手改。** `raycast/src/core/` 和 `raycast/tests/` 改了也会被下一次 sync 覆盖，`pnpm test` 会检出漂移并失败。
