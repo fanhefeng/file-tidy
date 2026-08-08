@@ -187,9 +187,10 @@ function reportPhase(phase, info = {}) {
 
 /**
  * The block appended to <dest>/.tidy/similar.md after a run that flagged
- * anything. Paths are absolute and post-move on purpose: this report exists
+ * anything. Paths are post-move and relative to the archive: this report exists
  * because the flags are visible nowhere else once the plan is gone, so it has
- * to say where each file actually ended up.
+ * to say where each file actually ended up — and since it sits inside that
+ * archive, an absolute prefix on every line would only bury the names.
  */
 function formatSimilarBlock(flagged, { destDir }) {
   const lines = [`\n## ${new Date().toISOString()}\n`];
