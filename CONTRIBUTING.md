@@ -78,13 +78,15 @@ pnpm test        # 跑测试 + 校验 raycast 副本未漂移
 
 `.github/workflows/ci.yml` 在推 `main` 和开 PR 时跑三个 job：
 
-| job       | 内容                                       | 为什么                                                                                                                                                    |
-| --------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test`    | `pnpm test`，Node 20.12 / 22 / 24 三个版本 | 20.12 是 `engines` 下限（CLI 用的 `node:util` `styleText` 是那时加的）。这一步同时跑 `sync --check`，**改了 `src/core/` 忘记 `pnpm sync` 会在这里被拦下** |
-| `format`  | `pnpm format:check`                        | 保证仓库始终是 Prettier 格式，避免格式改动混进功能 diff                                                                                                   |
-| `raycast` | `raycast/` 下 `npm ci` + `npm run lint`    | 跟 Store 提交时跑的是同一个 `ray lint`，让 lint 失败止步于本仓库，不流到 fork                                                                             |
+| job       | 内容                                                 | 为什么                                                                                                                                              |
+| --------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test`    | 测试 + `sync --check`，Node 20.12 / 22 / 24 三个版本 | 20.12 是 `engines` 下限（CLI 用的 `node:util` `styleText` 是那时加的）。`sync --check` 一并在这里跑，**改了 `src/core/` 忘记 `pnpm sync` 会被拦下** |
+| `format`  | `pnpm format:check`                                  | 保证仓库始终是 Prettier 格式，避免格式改动混进功能 diff                                                                                             |
+| `raycast` | `raycast/` 下 `npm ci` + `npm run lint`              | 跟 Store 提交时跑的是同一个 `ray lint`，让 lint 失败止步于本仓库，不流到 fork                                                                       |
 
 `raycast` job 用 npm 而不是 pnpm——扩展目录自包含、有自己的 `package-lock.json`，Store CI 也只认 npm。
+
+`test` job 里**装依赖和跑测试用的是两个不同的 Node**：依赖固定在 Node 22 上装，之后才切到被测版本、直接用 `node --test` 跑。原因是 **pnpm 11 自己要求 Node ≥ 22.13**（它 import 了 `node:sqlite`），在 20.12 上连 `pnpm install` 都跑不起来——照着「一个 Node 版本从头跑到尾」写，下限那档会挂在包管理器上，而不是在被测代码上。依赖全是纯 JS，没有需要重编译的原生模块，所以切换 Node 后照常可用。同理，这一档不能走 `pnpm test`，否则 pnpm 又挡在中间。
 
 ## 提交到 Raycast Store
 
