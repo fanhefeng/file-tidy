@@ -86,7 +86,7 @@ npm --prefix extensions/file-tidy run lint   # 必须全绿
 git commit && git push                        # PR 自动更新
 ```
 
-fork 是 `fanhefeng/extensions`，分支 `ext/file-tidy`。
+fork 是 `fanhefeng/extensions`。**每次提交都新开一个分支**，命名 `ext/file-tidy-<主题>`，合并后 Raycast 会自动删掉它——所以不存在一个长期复用的分支，上面的 `git push` 是往当次那个分支推。已合并的两次：`ext/file-tidy`（#29437，首次上架）、`ext/file-tidy-smart-checks`（#29952，两级归档 + 检测流水线）。
 
 ### Store 规范要点
 

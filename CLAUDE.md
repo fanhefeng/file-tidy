@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # file-tidy
 
-CLI + Raycast 扩展，共用 `src/core`。扩展已上架 Raycast Store，提交走 fork（`fanhefeng/extensions`，分支 `ext/file-tidy`）。
+CLI + Raycast 扩展，共用 `src/core`。扩展已上架 Raycast Store，提交走 fork（`fanhefeng/extensions`），每次提交新开一个 `ext/file-tidy-*` 分支，合并后由 Raycast 自动删除。
 
 **动手前先读 [CONTRIBUTING.md](CONTRIBUTING.md)** —— 分层约定、语言约定、commit 规范、Store 提交流程与检查清单都在那里。
 
