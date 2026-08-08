@@ -64,6 +64,11 @@ const UNDO_FAILURE_TEXT = {
   occupied: "the original location is taken",
 };
 
+const REPORT_LABEL = {
+  duplicates: "duplicate details",
+  similar: "look-alike report",
+};
+
 main().catch((err) => {
   console.error(styleText("red", `Error: ${formatError(err)}`));
   process.exit(1);
@@ -158,7 +163,7 @@ async function main() {
     return;
   }
 
-  const { moved, manifestPath, similarReportPath } = executePlan(entries, {
+  const { moved, manifestPath, similarReportPath, reportErrors } = executePlan(entries, {
     destDir,
     sourceDir,
     formatSimilarBlock,
@@ -170,11 +175,19 @@ async function main() {
         `${counts.review} set aside for review.`,
     ),
   );
+  const dupRecordFailed = reportErrors.some((e) => e.report === "duplicates");
   const firstDup = moved.find((e) => e.action === "duplicate");
-  if (firstDup) console.log(`Duplicate details: ${path.join(path.dirname(firstDup.to), "manifest.md")}`);
+  // Pointing at the manifest that failed to be written would send the reader to
+  // a file that doesn't say what this run did.
+  if (firstDup && !dupRecordFailed) {
+    console.log(`Duplicate details: ${path.join(path.dirname(firstDup.to), "manifest.md")}`);
+  }
   // The flags are gone from view once the plan is: the files were archived
   // normally, so nothing on disk shows which ones were grouped together.
   if (similarReportPath) console.log(`Flagged look-alikes: ${similarReportPath}`);
+  // Warnings, not failures: these come back only from appends that happen after
+  // the last file has already moved.
+  for (const err of reportErrors) console.log(styleText("yellow", `Warning: ${formatError(err)}`));
   console.log(styleText("dim", `Run recorded at ${manifestPath} (undo with: tidy undo)`));
 }
 
@@ -222,6 +235,8 @@ function formatError(err) {
       return `The ${err.label} name from your config is not a plain folder name: "${err.segment}"`;
     case "TIDY_DIR_ESCAPES":
       return `The .tidy folder in ${err.destDir} is a link pointing outside it, so tidy won't read or write its records there`;
+    case "REPORT_WRITE":
+      return `Every file was moved, but the ${REPORT_LABEL[err.report] ?? err.report} could not be written (${err.path}): ${err.cause?.message ?? ""}`;
     default:
       return err.message;
   }
