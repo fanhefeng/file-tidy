@@ -48,7 +48,7 @@ scan → health（先于 dedup：坏文件不参与去重）→ dedup（字节�
 关键约定：
 
 - **只有 `plan.js` 决定文件去向**，别处不要拼目标路径。新检测加进 `analyze.js` 编排，以 Map 喂给 `buildPlan`。
-- `execute.js` 执行移动并把运行清单写进目标目录 `.tidy/runs/`，`undo.js` 靠它撤销。
+- `execute.js` 执行移动并把运行清单写进目标目录 `.tidy/runs/`，`undo.js` 靠它撤销。它还在有标注时追加 `.tidy/similar.md`——`similar`/`perceptual` 不改去向，报告是这层分组关系唯一活过本次运行的地方。**报告里的 peers 必须重映射到移动后的落点**（记录时是移动前的路径，跟 `keeperPath` 同一类问题），文案照例归适配层的 `formatSimilarBlock`。
 - 判断路径包含关系必须先对两端 `canonicalPath`（字符串比较会被符号链接绕过，`undo.js` 栽过）；`.tidy` 下的路径一律走 `tidyPath()`，不要自己 `path.join`。
 - **core 不写面向用户的文案**，只抛带 `code` 的错误（`CONFIG_PARSE`、`INVALID_SEGMENT`、`TIDY_DIR_ESCAPES`、`EXDEV_VERIFY`、`MANIFEST_CORRUPT`）。文案只在两处：CLI 的 `formatError`（`bin/tidy.js`）和扩展的 `describeError`（`raycast/src/errors.ts`）。**新增错误码两边都要补**，否则 core 的原始英文会漏给用户。
 - CLI 和扩展读同一份配置：`~/.config/tidy/config.json`（Windows 是 `%APPDATA%\tidy\config.json`），逻辑在 `config.js`。

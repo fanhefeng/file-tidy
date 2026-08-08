@@ -7,7 +7,7 @@ import readline from "node:readline/promises";
 import { parseArgs, styleText } from "node:util";
 import { analyze } from "../src/core/analyze.js";
 import { TIDY_DIR, canonicalPath, isInsideDir, loadConfig } from "../src/core/config.js";
-import { executePlan } from "../src/core/execute.js";
+import { executePlan, relativeToDest } from "../src/core/execute.js";
 import { bucketLabel, formatSize } from "../src/core/plan.js";
 import { undoLastRun } from "../src/core/undo.js";
 
@@ -158,7 +158,11 @@ async function main() {
     return;
   }
 
-  const { moved, manifestPath } = executePlan(entries, { destDir, sourceDir });
+  const { moved, manifestPath, similarReportPath } = executePlan(entries, {
+    destDir,
+    sourceDir,
+    formatSimilarBlock,
+  });
   console.log(
     styleText(
       "green",
@@ -168,6 +172,9 @@ async function main() {
   );
   const firstDup = moved.find((e) => e.action === "duplicate");
   if (firstDup) console.log(`Duplicate details: ${path.join(path.dirname(firstDup.to), "manifest.md")}`);
+  // The flags are gone from view once the plan is: the files were archived
+  // normally, so nothing on disk shows which ones were grouped together.
+  if (similarReportPath) console.log(`Flagged look-alikes: ${similarReportPath}`);
   console.log(styleText("dim", `Run recorded at ${manifestPath} (undo with: tidy undo)`));
 }
 
@@ -177,6 +184,30 @@ function reportPhase(phase, info = {}) {
 }
 
 // ---------- Copy: formatters ----------
+
+/**
+ * The block appended to <dest>/.tidy/similar.md after a run that flagged
+ * anything. Paths are absolute and post-move on purpose: this report exists
+ * because the flags are visible nowhere else once the plan is gone, so it has
+ * to say where each file actually ended up.
+ */
+function formatSimilarBlock(flagged, { destDir }) {
+  const lines = [`\n## ${new Date().toISOString()}\n`];
+  const peers = (list) => list.map((p) => `\`${relativeToDest(p, destDir)}\``).join(", ");
+  for (const e of flagged) {
+    const name = relativeToDest(e.to, destDir);
+    if (e.perceptual) {
+      const best = e.perceptual.best ? " (largest of the set)" : "";
+      lines.push(`- \`${name}\`${best}\n  looks nearly identical to ${peers(e.perceptual.peers)}`);
+    }
+    if (e.similar) {
+      const what = SIMILAR_TEXT[e.similar.reason] ?? e.similar.reason;
+      const best = e.similar.best ? " (this one looks the most complete)" : "";
+      lines.push(`- \`${name}\`${best}\n  ${what}: ${peers(e.similar.peers)}`);
+    }
+  }
+  return lines.join("\n") + "\n";
+}
 
 function formatError(err) {
   switch (err.code) {
