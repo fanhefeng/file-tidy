@@ -79,14 +79,45 @@ pnpm test        # 跑测试 + 校验 raycast 副本未漂移
 ### 流程
 
 ```bash
-pnpm test        # 必须全绿
-pnpm sync:fork   # raycast/ → fork 的 extensions/file-tidy/
-cd ~/.config/raycast/public-extensions-fork
-npm --prefix extensions/file-tidy run lint   # 必须全绿
-git commit && git push                        # PR 自动更新
+pnpm test                                     # 必须全绿
+
+FORK=~/.config/raycast/public-extensions-fork
+git -C $FORK checkout main
+git -C $FORK checkout -b ext/file-tidy-<主题>       # 先开分支，再往里 sync
+git -C $FORK sparse-checkout add extensions/file-tidy   # 见下方「坑一」
+
+pnpm sync:fork                                # raycast/ → fork 的 extensions/file-tidy/
+cd raycast && npm run lint && npm run build   # 必须全绿；在主仓库跑，见下方「坑二」
+
+git -C $FORK add extensions/file-tidy
+git -C $FORK commit && git -C $FORK push -u origin ext/file-tidy-<主题>
+gh pr create --repo raycast/extensions --base main --head fanhefeng:ext/file-tidy-<主题>
 ```
 
 fork 是 `fanhefeng/extensions`。**每次提交都新开一个分支**，命名 `ext/file-tidy-<主题>`，合并后 Raycast 会自动删掉它——所以不存在一个长期复用的分支，上面的 `git push` 是往当次那个分支推。已合并的两次：`ext/file-tidy`（#29437，首次上架）、`ext/file-tidy-smart-checks`（#29952，两级归档 + 检测流水线）。
+
+建 PR 用 `gh`，不要用 GitHub MCP：那边的 PAT 对 `raycast/extensions` 没有写权限，会 403。
+
+### fork checkout 的两个坑
+
+`~/.config/raycast/public-extensions-fork` 是个 **sparse-checkout + `blob:none` 部分克隆**的 raycast/extensions（整仓太大，不这样搞没法用）。这带来两个必踩的坑：
+
+**坑一：sparse-checkout 是按扩展圈定的，换扩展干活前必须先把目录加进去。**
+
+做完另一个扩展后，sparse 范围里可能只剩那个扩展。此时 `git add extensions/file-tidy` 会拒绝**新增**文件：
+
+```
+The following paths ... exist outside of your sparse-checkout definition,
+so will not be updated in the index: extensions/file-tidy/src/core/date.d.ts
+```
+
+危险的地方在于**它只报新文件**——已存在的文件因为磁盘上有内容，照常显示为 `M`，看着一切正常。不留神就会提交一个漏掉新文件的分支，而且 lint 和 build 都在主仓库跑，发现不了。
+
+`sparse-checkout add` 之后 git 会按 HEAD 检出该目录，**可能覆盖刚 sync 过去的内容，所以要重新 `pnpm sync:fork` 一次**。上面的流程把 `sparse-checkout add` 放在 sync 之前就是为了这个。
+
+**坑二：fork 里没有 `node_modules`，`ray` 命令不存在。**
+
+`npm --prefix extensions/file-tidy run lint` 在 fork 里跑会直接 `sh: ray: command not found`。lint 和 build 都在**主仓库 `raycast/`** 跑——`sync:fork` 之后两边逐字节一致，等价。真要在 fork 里跑就得先 `npm install`，没必要。
 
 ### Store 规范要点
 
