@@ -129,7 +129,7 @@ async function main() {
 
   if (flags.plain) config.detect = false;
 
-  const { entries, sourceFiles, counts } = await analyze({
+  const { entries, sourceFiles, counts, hashCache } = await analyze({
     sourceDir,
     destDir,
     config,
@@ -166,6 +166,7 @@ async function main() {
   const { moved, manifestPath, similarReportPath, reportErrors } = executePlan(entries, {
     destDir,
     sourceDir,
+    hashCache,
     formatSimilarBlock,
   });
   console.log(
