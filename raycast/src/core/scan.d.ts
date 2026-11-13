@@ -5,8 +5,13 @@ export interface SourceFile {
   name: string;
   ext: string;
   size: number;
+  /** Filesystem identity captured with size and timestamps, for stale-preview checks. */
+  ino?: number;
+  dev?: number;
   birthtime: Date;
   mtime: Date;
+  /** Full timestamp precision for preview validation; Date truncates fractional milliseconds. */
+  mtimeMs?: number;
 }
 export interface CompiledSubRule {
   name: string;

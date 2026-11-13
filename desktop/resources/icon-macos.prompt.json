@@ -1,0 +1,8 @@
+{
+  "tool": "built-in image_gen",
+  "source": "icon.png",
+  "intent": "Preserve the File Tidy folder/document/checkmark identity; correct only the macOS app silhouette and optical size.",
+  "generation_prompt": "Edit the supplied File Tidy icon into a standalone macOS Dock icon. Preserve the mint folder, yellow document and yellow checkmark badge, dark outlines and original composition. Center the warm ivory tile as a smooth rounded square with generous actual transparent margin on all sides; reduce the optical size. No text, arrows, new symbols, mockup or surrounding Dock.",
+  "cleanup_prompt": "Keep the inner artwork unchanged. Remove stray pixels and ragged fragments outside the rounded tile, retain a smooth antialiased rounded contour and actual RGBA transparency. Keep generous transparent margins; do not enlarge the tile.",
+  "export": "Normalize square PNG to 1024x1024 with sips; generate native ICNS resolutions using scripts/build-macos-icon.mjs."
+}

@@ -1,6 +1,6 @@
 # 开发规范
 
-本项目同时发布 CLI 和 Raycast 扩展，扩展要提交到 [raycast/extensions](https://github.com/raycast/extensions) 官方仓库。下面的约定一部分是 Raycast Store 的硬性要求，一部分是为了让两个发行版不产生分歧。
+本项目包含 CLI、Raycast 扩展和 Electron 桌面端，扩展要提交到 [raycast/extensions](https://github.com/raycast/extensions) 官方仓库。下面的约定一部分是 Raycast Store 的硬性要求，一部分是为了让两个发行版不产生分歧。
 
 ## 分层与单一真源
 
@@ -8,6 +8,7 @@
 src/core/        唯一真源：纯逻辑，不含任何面向用户的文案
 bin/tidy.js      CLI 适配层：终端文案与交互
 raycast/src/     Raycast 适配层：表单与列表 UI
+desktop/src/    Electron 适配层：主进程、线程、preload 与 React 界面
 raycast/src/core 生成物，由 scripts/sync.js 从 src/core 原样复制
 raycast/tests    生成物，由 scripts/sync.js 从 test/ 原样复制
 test/            核心逻辑测试（node:test）
@@ -15,15 +16,16 @@ test/            核心逻辑测试（node:test）
 
 三条不可破的约定：
 
-1. **core 不说话。** 它只返回数据，出错时抛带 `code` 的错误（`CONFIG_PARSE`、`INVALID_SEGMENT`、`TIDY_DIR_ESCAPES`、`EXDEV_VERIFY`、`MANIFEST_CORRUPT`），措辞归适配层。文案只有两处：CLI 的 `formatError`（`bin/tidy.js`）和扩展的 `describeError`（`raycast/src/errors.ts`）。**新增错误码时两处都要补**，否则 core 的原始英文会直接漏给用户。core 里任何 `throw` 都必须带 `code`，裸 `new Error` 等于绕过这条约定。
-   - 唯一不抛的错误码是 `REPORT_WRITE`：它只描述**最后一个文件移动完成之后**的追加写失败（`ft_Duplicates/manifest.md` 与 `.tidy/similar.md`）。这时丢的是记录不是文件，抛出去会把一次已经完成的归档报成失败，还会诱使用户在已经搬空的源目录上重试。所以它走 `executePlan` 返回值里的 `reportErrors`，由适配层当**警告**呈现——同样两处都要有文案。
+1. **core 不说话。** 它只返回数据，出错时抛带 `code` 的错误（`CONFIG_PARSE`、`INVALID_SEGMENT`、`TIDY_DIR_ESCAPES`、`EXDEV_VERIFY`、`MANIFEST_CORRUPT`），措辞归适配层。文案位于 CLI 的 `formatError`（`bin/tidy.js`）、扩展的 `describeError`（`raycast/src/errors.ts`）和桌面端 `describeError`（`desktop/src/main/errors.ts`）。**新增错误码时三处都要补**，否则 core 的原始英文会直接漏给用户。core 里任何 `throw` 都必须带 `code`，裸 `new Error` 等于绕过这条约定。
+   - 唯一不抛的错误码是 `REPORT_WRITE`：它只描述**最后一个文件移动完成之后**的追加写失败（`ft_Duplicates/manifest.md` 与 `.tidy/similar.md`）。这时丢的是记录不是文件，抛出去会把一次已经完成的归档报成失败，还会诱使用户在已经搬空的源目录上重试。所以它走 `executePlan` 返回值里的 `reportErrors`，由适配层当**警告**呈现——同样三个适配层都要有文案。
 2. **`plan.js` 是唯一决定文件去向的地方。** 不要在别处拼目标路径。新增检测请加进 `analyze.js` 的编排，以 Map 形式喂给 `buildPlan`。
    - 与之配套：**判断路径是否在某个目录内，必须先 `canonicalPath` 两端**（`isInsideDir` 的注释写着这条前提）。只比较字符串会被中间某段的符号链接绕过——`undo.js` 曾经栽在这里。`.tidy` 下的任何路径一律走 `tidyPath()`，不要自己 `path.join(destDir, ".tidy", …)`。
-3. **生成物不手改。** `raycast/src/core/` 和 `raycast/tests/` 改了也会被下一次 sync 覆盖，`pnpm test` 会检出漂移并失败。
+3. **纯规则与 I/O 分开。** `rules.js` 负责扩展名、子规则和标签分组的纯计算；`metadata.js` 负责音频标签读取；`analyze.js` 编排。适配层通过 `src/core/index.js` 调用，桌面端在后台线程执行，渲染进程不访问 Node。
+4. **生成物不手改。** `raycast/src/core/` 和 `raycast/tests/` 改了也会被下一次 sync 覆盖，`pnpm test` 会检出漂移并失败。
 
 ## 语言约定
 
-**一切代码与运行时输出用英文，只有根目录的项目文档用中文。**
+**代码、注释、CLI 和 Raycast 输出用英文；桌面端按用户要求支持简体中文和英文。根目录的项目文档用中文。**
 
 | 位置                                       | 语言 |
 | ------------------------------------------ | ---- |
@@ -36,7 +38,7 @@ test/            核心逻辑测试（node:test）
 
 > At the moment, Raycast doesn't support localization and only supports US English. Therefore, please avoid introducing your custom way to localize your extension.
 
-没有 i18n 机制，且明确劝阻自建本地化方案，还要求**美式**拼写。CLI 虽然不进 Store，但仓库公开、`bin` 可全局安装，跟着一起用英文。
+没有 i18n 机制，且明确劝阻自建本地化方案，还要求**美式**拼写。CLI 虽然不进 Store，但仓库公开、`bin` 可全局安装，跟着一起用英文。Electron 桌面端独立支持 `zh-CN` / `en`，此要求仅作用于桌面适配层；语言偏好不得写入共享归类 JSON。新增文案应同时补齐双语字典，保留文件名、真实路径、JSON 键和自定义类别原值。
 
 唯一的例外是**匹配规则里的中文**——`config.js` 的二级分类正则、`similar.js` 的副本标记、`dedup.js` 的 `副本`/`拷贝`。那是识别中文文件名的功能数据，不是文案，删了中文文件就认不出来。
 
@@ -79,15 +81,15 @@ pnpm test        # 跑测试 + 校验 raycast 副本未漂移
 
 `.github/workflows/ci.yml` 在推 `main` 和开 PR 时跑三个 job：
 
-| job       | 内容                                                 | 为什么                                                                                                                                              |
-| --------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test`    | 测试 + `sync --check`，Node 20.12 / 22 / 24 三个版本 | 20.12 是 `engines` 下限（CLI 用的 `node:util` `styleText` 是那时加的）。`sync --check` 一并在这里跑，**改了 `src/core/` 忘记 `pnpm sync` 会被拦下** |
-| `format`  | `pnpm format:check`                                  | 保证仓库始终是 Prettier 格式，避免格式改动混进功能 diff                                                                                             |
-| `raycast` | `raycast/` 下 `npm ci` + `npm run lint`              | 跟 Store 提交时跑的是同一个 `ray lint`，让 lint 失败止步于本仓库，不流到 fork                                                                       |
+| job       | 内容                                                   | 为什么                                                                                                                              |
+| --------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `test`    | 测试 + `sync --check`，Node 22.23.5 / 24.22.3 两个版本 | Node 20 已结束支持；两个受支持分支均固定到安全补丁基线。`sync --check` 一并在这里跑，**改了 `src/core/` 忘记 `pnpm sync` 会被拦下** |
+| `format`  | `pnpm format:check`                                    | 保证仓库始终是 Prettier 格式，避免格式改动混进功能 diff                                                                             |
+| `raycast` | `raycast/` 下 `npm ci` + `npm run lint`                | 跟 Store 提交时跑的是同一个 `ray lint`，让 lint 失败止步于本仓库，不流到 fork                                                       |
 
 `raycast` job 用 npm 而不是 pnpm——扩展目录自包含、有自己的 `package-lock.json`，Store CI 也只认 npm。
 
-`test` job 里**装依赖和跑测试用的是两个不同的 Node**：依赖固定在 Node 22 上装，之后才切到被测版本、直接用 `node --test` 跑。原因是 **pnpm 11 自己要求 Node ≥ 22.13**（它 import 了 `node:sqlite`），在 20.12 上连 `pnpm install` 都跑不起来——照着「一个 Node 版本从头跑到尾」写，下限那档会挂在包管理器上，而不是在被测代码上。依赖全是纯 JS，没有需要重编译的原生模块，所以切换 Node 后照常可用。同理，这一档不能走 `pnpm test`，否则 pnpm 又挡在中间。
+`test` job 在 Node 22.23.5 上安装依赖，再切换到被测版本直接用 `node --test` 跑。依赖全是纯 JS，没有需要重编译的原生模块。Node 22.23.5 和 24.22.3 均满足 pnpm 11 的运行要求。
 
 ## 提交到 Raycast Store
 
@@ -167,3 +169,16 @@ gh api repos/raycast/extensions/pulls/<PR>/commits --jq '.[] | "\(.author.login)
 2. 在 `CHANGELOG.md` 顶部加版本条目，写清行为变化与迁移影响
 3. `raycast/CHANGELOG.md` 单独加一条，只写面向扩展用户的变化
 4. commit：`chore(release): 0.6.0`
+
+## Electron 桌面端开发
+
+`desktop/` 使用自己的 npm 锁文件，与 Raycast 的独立安装方式一致。根目录仍由 pnpm 管理。
+
+```bash
+npm --prefix desktop ci
+pnpm desktop:dev
+pnpm desktop:test
+pnpm desktop:package
+```
+
+主进程只暴露明确的 preload 方法，后台线程持有计划，界面只能提交计划 ID；所有文件目标路径仍由核心 `plan.js` 决定。变更目录、选项或保存配置后应重新预览。界面遵守 [desktop/DESIGN.md](desktop/DESIGN.md)：浅色、清晰字级、克制奶油黄强调，默认无装饰性箭头，交互保留键盘聚焦状态。

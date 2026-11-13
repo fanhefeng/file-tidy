@@ -15,12 +15,14 @@ ft_Images/2026-07/                 photos, by capture month
 ft_Images/Screenshots/2026-07/     recognised by filename
 ft_Documents/Ebooks/2026/          documents, by year
 ft_Archives/Installers/            installers, not dated at all
+ft_Audios/Artist/Album/            audio, from embedded tags
 ft_Duplicates/                     byte-identical copies, with a manifest
 ft_Review/empty|corrupt|junk/      set aside, never deleted
 ```
 
 - **Two-level sorting**: extension decides the category, filename and extension rules decide the optional subcategory (Screenshots, Ebooks, Invoices, Contracts, Installers, …).
 - **Date depth per category**: photos and videos by year-month (EXIF capture date when available), documents by year, installers and fonts not by date — a download date is not worth a folder per month.
+- **Audio grouping**: embedded audio tags can organize music by artist, album, song title, album artist, genre, or year. The default groups by artist and album, with fallback folders for missing tags.
 - **The `ft_` prefix** keeps the extension's output visually apart from folders you made yourself. If an un-prefixed archive already exists in the destination, it is reused rather than split into two parallel trees.
 
 **What it detects**
@@ -50,9 +52,28 @@ Moves every file from the most recent run back where it came from and removes th
 
 ## Customization
 
-Categories, subcategory rules, the folder prefix, date depth and the detection toggles all live in a shared config file, created with sensible defaults on first run:
+Categories, custom extensions, audio grouping, subcategory rules, the folder prefix, date depth and detection toggles all live in a shared config file, created with sensible defaults on first run. Use **Edit Classification Rules** in the Tidy Folder action panel to open it:
 
 - macOS and Linux: `~/.config/tidy/config.json`
 - Windows: `%APPDATA%\tidy\config.json`
 
 `categories` and `subCategories` replace the defaults outright, so you can remove rules you don't want. Set `folderPrefix` to `""` for un-prefixed folder names, or `detect` to `false` to turn every extra check off.
+
+Use `extensions` to add or override suffixes while keeping built-in categories. Use `groupBy` to choose the ordered metadata folder levels for a category:
+
+```json
+{
+  "extensions": {
+    "blend": "Design",
+    "opus": "Audios"
+  },
+  "groupBy": {
+    "Audios": ["artist", "album"]
+  },
+  "granularity": {
+    "Design": "none"
+  }
+}
+```
+
+For example, `["album"]` groups music by album, `["title"]` groups by song, and `[]` puts audio directly in its category folder. Invalid configuration fields are reported before files are moved. The CLI and desktop app use the same rules and shared config location.

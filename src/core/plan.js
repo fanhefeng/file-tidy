@@ -3,6 +3,7 @@ import path from "node:path";
 import { DUPLICATES_DIR, REVIEW_DIR, TIDY_DIR } from "./config.js";
 import { classify, subClassify } from "./scan.js";
 import { resolveDateBucket } from "./date.js";
+import { groupingSegments } from "./rules.js";
 
 /**
  * Build the move plan for all source files.
@@ -25,7 +26,7 @@ export async function buildPlan({
   sourceFiles,
   duplicates,
   destDir,
-  extIndex,
+  extIndex = new Map(),
   fallbackCategory,
   // Required, no identity fallback: a forgotten folderName would silently
   // archive into un-prefixed folders instead of failing loudly.
@@ -35,6 +36,8 @@ export async function buildPlan({
   health = new Map(),
   similar = new Map(),
   perceptual = new Map(),
+  classifications = new Map(),
+  metadata = new Map(),
 }) {
   const entries = [];
   const reserved = new Set();
@@ -81,9 +84,15 @@ export async function buildPlan({
       continue;
     }
 
-    const category = classify(file, extIndex, fallbackCategory);
-    const subCategory = subClassify(file, category, subIndex);
-    const { bucket, source: dateSource } = await resolveDateBucket(file, granularity[category] ?? "month");
+    const classification = classifications.get(file.path);
+    const category = classification?.category ?? classify(file, extIndex, fallbackCategory);
+    const subCategory = classification ? classification.subCategory : subClassify(file, category, subIndex);
+    const tags = metadata.get(file.path);
+    const grouping = groupingSegments(file, classification?.groupBy ?? [], tags?.tags);
+    const { bucket, source: dateSource } = await resolveDateBucket(
+      file,
+      classification?.granularity ?? granularity[category] ?? "month",
+    );
     // Category, sub-category and the folder prefix all come from the user's
     // config file: without this check a hand-edited "../../" would archive
     // outside destDir entirely.
@@ -91,6 +100,7 @@ export async function buildPlan({
       destDir,
       validSegment(folderName(category), "category"),
       subCategory && validSegment(subCategory, "sub-category"),
+      ...grouping.map((segment) => validSegment(segment, "metadata")),
       bucket,
       file.name,
     ].filter(Boolean);
@@ -103,6 +113,8 @@ export async function buildPlan({
       subCategory,
       dateBucket: bucket,
       dateSource,
+      grouping,
+      ...(tags && { metadata: tags.tags, metadataStatus: tags.status }),
       size: file.size,
       ...annotations,
     });

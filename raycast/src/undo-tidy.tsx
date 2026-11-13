@@ -3,7 +3,6 @@ import {
   ActionPanel,
   Alert,
   Form,
-  Icon,
   Toast,
   confirmAlert,
   getPreferenceValues,
@@ -11,8 +10,7 @@ import {
   showToast,
 } from "@raycast/api";
 import { useRef, useState } from "react";
-import { canonicalPath } from "./core/config.js";
-import { getLastRun, undoRun } from "./core/undo.js";
+import { canonicalPath, getLastRun, undoRun } from "./core/index.js";
 import { describeError } from "./errors.js";
 
 export default function UndoTidyCommand() {
@@ -93,7 +91,7 @@ export default function UndoTidyCommand() {
       isLoading={loading}
       actions={
         <ActionPanel>
-          <Action.SubmitForm title="Undo Last Tidy" icon={Icon.Undo} onSubmit={handleSubmit} />
+          <Action.SubmitForm title="Undo Last Tidy" onSubmit={handleSubmit} />
         </ActionPanel>
       }
     >

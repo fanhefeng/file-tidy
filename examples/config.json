@@ -1,0 +1,17 @@
+{
+  "extensions": {
+    "myproject": "Projects",
+    "tar.gz": "Archives",
+    "flac": {
+      "category": "Audios",
+      "groupBy": ["albumArtist", "album"],
+      "granularity": "none"
+    }
+  },
+  "groupBy": {
+    "Audios": ["artist", "album"]
+  },
+  "granularity": {
+    "Projects": "none"
+  }
+}

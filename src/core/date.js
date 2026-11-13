@@ -1,4 +1,4 @@
-import exifr from "exifr";
+import { readExif } from "./exif.js";
 
 const EXIF_EXTS = new Set([
   "jpg",
@@ -27,7 +27,7 @@ export async function resolveDateBucket(file, granularity = "month") {
   if (granularity === "none") return { bucket: "", source: "none" };
   if (EXIF_EXTS.has(file.ext)) {
     try {
-      const exif = await exifr.parse(file.path, { pick: ["DateTimeOriginal", "CreateDate"] });
+      const exif = await readExif(file.path, { pick: ["DateTimeOriginal", "CreateDate"] });
       const taken = exif?.DateTimeOriginal ?? exif?.CreateDate;
       if (taken instanceof Date && !Number.isNaN(taken.getTime()) && taken.getFullYear() > 1980) {
         return { bucket: format(taken, granularity), source: "exif" };

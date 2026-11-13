@@ -1,5 +1,9 @@
 # File Tidy Changelog
 
+## [Fix EXIF File Handles] - {PR_MERGE_DATE}
+
+- Close metadata and thumbnail file readers on success and failure, preserving embedded capture dates and thumbnails.
+
 ## [New Icon, and Previews That Leave No Trace] - {PR_MERGE_DATE}
 
 - A refreshed extension icon, with the Store screenshots re-shot to match.

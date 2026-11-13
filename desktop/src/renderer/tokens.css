@@ -1,0 +1,26 @@
+:root {
+  color-scheme: light;
+  --canvas: #f4f5f7;
+  --surface: #ffffff;
+  --surface-soft: #f5f6f8;
+  --surface-hover: #eceff3;
+  --ink: #252b34;
+  --secondary: #515b69;
+  --muted: #697380;
+  --line: #e4e7ec;
+  --line-strong: #c8ced8;
+  --primary: #29313d;
+  --primary-hover: #171e28;
+  --accent: #315fa7;
+  --accent-soft: #edf3fd;
+  --mint: #edf6f1;
+  --mint-ink: #34644b;
+  --cream: #fff6dc;
+  --warning: #805b17;
+  --danger: #aa3535;
+  --danger-soft: #fbefee;
+  --success: #34644b;
+  --focus: #315fa7;
+  --radius: 10px;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}

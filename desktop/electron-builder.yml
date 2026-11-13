@@ -1,0 +1,27 @@
+appId: com.filetidy.desktop
+productName: File Tidy
+asar: true
+icon: resources/icon.png
+directories:
+  output: release
+files:
+  - out/**/*
+  - package.json
+mac:
+  identity: null
+  icon: resources/icon.icns
+  extraResources:
+    - from: resources/icon-macos.png
+      to: icon-macos.png
+  category: public.app-category.utilities
+  target:
+    - dmg
+    - zip
+win:
+  target:
+    - nsis
+linux:
+  category: Utility
+  target:
+    - AppImage
+    - deb

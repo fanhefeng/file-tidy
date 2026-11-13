@@ -15,30 +15,24 @@ jobs:
       # is exactly what this matrix exists to catch.
       fail-fast: false
       matrix:
-        # 20.12 is the engines floor (the CLI uses node:util styleText, added
-        # there); 24 is current.
-        node: ["20.12", "22", "24"]
+        # Supported release lines pinned to the security baseline.
+        node: ["22.23.5", "24.22.3"]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
-      # Dependencies are installed on a Node new enough to run the package
-      # manager, not on the version under test: pnpm 11 imports node:sqlite and
-      # so needs 22.13+, which would make the engines floor unreachable here.
-      # The deps are pure JS with nothing to rebuild, so they stay valid across
-      # the switch below.
+      # Install on the supported Node 22 baseline before switching to the
+      # release line under test. These dependencies are pure JavaScript.
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "22.23.5"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Now switch to the version actually being tested and drive node
-      # directly — going through `pnpm test` would pull pnpm back in and put
-      # its own Node requirement between us and the floor we mean to verify.
+      # Test the selected supported release directly.
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
       - run: node --version
-      - run: node --test test/*.test.js
+      - run: node --test test/*.test.js test-adapters/*.test.js
       # Fails when raycast/src/core or raycast/tests have drifted from the
       # originals they are generated from.
       - run: node scripts/sync.js --check
@@ -50,7 +44,7 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "22.23.5"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
@@ -62,7 +56,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "22.23.5"
           cache: npm
           cache-dependency-path: raycast/package-lock.json
       # The extension directory is self-contained and has its own lockfile:
@@ -73,3 +67,20 @@ jobs:
       # lint failure never reaches the fork.
       - run: npm run lint
         working-directory: raycast
+
+  desktop:
+    name: desktop (build and worker integration)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.23.5"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+        working-directory: desktop
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - run: npm test
+        working-directory: desktop

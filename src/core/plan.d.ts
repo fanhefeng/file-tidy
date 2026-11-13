@@ -4,6 +4,8 @@ import type { DupInfo } from "./dedup.js";
 import type { HealthIssue } from "./health.js";
 import type { SimilarInfo } from "./similar.js";
 import type { PerceptualInfo } from "./phash.js";
+import type { FileClassification } from "./rules.js";
+import type { AudioMetadata, MetadataResult } from "./metadata.js";
 
 export interface PlanEntry {
   from: string;
@@ -14,6 +16,9 @@ export interface PlanEntry {
   subCategory?: string | null;
   dateBucket?: string;
   dateSource?: "exif" | "fs" | "none";
+  grouping?: string[];
+  metadata?: AudioMetadata;
+  metadataStatus?: MetadataResult["status"];
   size: number;
   keeperPath?: string;
   hash?: string;
@@ -26,7 +31,7 @@ export function buildPlan(input: {
   sourceFiles: SourceFile[];
   duplicates: Map<string, DupInfo>;
   destDir: string;
-  extIndex: Map<string, string>;
+  extIndex?: Map<string, string>;
   fallbackCategory: string;
   folderName: (base: string) => string;
   granularity?: Record<string, Granularity>;
@@ -34,6 +39,8 @@ export function buildPlan(input: {
   health?: Map<string, HealthIssue>;
   similar?: Map<string, SimilarInfo>;
   perceptual?: Map<string, PerceptualInfo>;
+  classifications?: Map<string, FileClassification>;
+  metadata?: Map<string, MetadataResult>;
 }): Promise<PlanEntry[]>;
 export function firstFreeName(target: string, isFree: (candidate: string) => boolean): string;
 export function bucketLabel(entry: PlanEntry, destDir: string): string;

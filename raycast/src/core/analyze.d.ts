@@ -3,7 +3,7 @@ import type { HashCacheEntry } from "./phash.js";
 import type { PlanEntry } from "./plan.js";
 import type { SourceFile } from "./scan.js";
 
-export type Phase = "scanning" | "dedup" | "health" | "similar" | "perceptual" | "planning";
+export type Phase = "scanning" | "dedup" | "health" | "similar" | "perceptual" | "metadata" | "planning";
 
 export interface AnalyzeCounts {
   archive: number;

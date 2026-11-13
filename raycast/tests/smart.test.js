@@ -151,7 +151,7 @@ test("a config missing newer categories is reported, never silently patched", as
     encoding: "utf8",
   });
   const { stale, cats } = JSON.parse(out.trim().split("\n").pop());
-  assert.deepEqual(stale, ["Fonts"]); // reported
+  assert.deepEqual(stale, ["Fonts", "Code", "Data", "Design"]); // reported
   assert.ok(!cats.includes("Fonts")); // but not added behind the user's back
 });
 

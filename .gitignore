@@ -3,3 +3,13 @@ raycast/dist/
 raycast/pnpm-lock.yaml
 .tidy/
 .DS_Store
+
+# Electron build and distribution artifacts
+desktop/out/
+desktop/release/
+
+# Local design skill session records
+desktop/.impeccable/
+
+# Local pnpm store
+.pnpm-store/

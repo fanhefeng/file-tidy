@@ -1,10 +1,12 @@
-import { TIDY_DIR, buildExtIndex, buildFolderNamer, organizedDirNames, quarantineDirNames } from "./config.js";
+import { TIDY_DIR, buildFolderNamer, organizedDirNames, quarantineDirNames } from "./config.js";
 import { findDuplicates } from "./dedup.js";
 import { checkHealth } from "./health.js";
 import { clusterByHash, hashImages, isHashableImage, loadHashCache } from "./phash.js";
 import { buildPlan } from "./plan.js";
-import { buildSubIndex, scanDest, scanSource } from "./scan.js";
+import { scanDest, scanSource } from "./scan.js";
 import { findSimilar } from "./similar.js";
+import { compileRules } from "./rules.js";
+import { readAudioMetadata } from "./metadata.js";
 
 /**
  * Scan, run every enabled detection pass, and build the plan — the whole
@@ -22,6 +24,7 @@ import { findSimilar } from "./similar.js";
  * defeat the adapters' "destination doesn't exist, create it?" consent check.
  */
 export async function analyze({ sourceDir, destDir, config, recursive = false, inPlace = false, onPhase = () => {} }) {
+  const classifyFile = compileRules(config);
   // config.detect === false turns every pass off, current and future — the
   // adapters' "plain mode" switch can't silently miss a newly added key.
   const detect = (pass) => config.detect !== false && (config.detect?.[pass] ?? true);
@@ -95,19 +98,29 @@ export async function analyze({ sourceDir, destDir, config, recursive = false, i
     }
   }
 
+  const classifications = new Map(healthy.map((file) => [file.path, classifyFile(file)]));
+  const taggedFiles = healthy.filter((file) => classifications.get(file.path).groupBy.length);
+  let metadata = new Map();
+  if (taggedFiles.length) {
+    onPhase("metadata", { files: taggedFiles.length, done: 0 });
+    metadata = await readAudioMetadata(taggedFiles, {
+      onProgress: (done) => onPhase("metadata", { files: taggedFiles.length, done }),
+    });
+  }
+
   onPhase("planning");
   const entries = await buildPlan({
     sourceFiles,
     duplicates,
     destDir,
-    extIndex: buildExtIndex(config),
     fallbackCategory: config.fallbackCategory,
     folderName: buildFolderNamer(destDir, config),
     granularity: config.granularity,
-    subIndex: buildSubIndex(config.subCategories),
     health,
     similar,
     perceptual,
+    classifications,
+    metadata,
   });
 
   return { entries, sourceFiles, counts: countBy(entries), hashCache };

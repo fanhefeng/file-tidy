@@ -5,20 +5,28 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { parseArgs, styleText } from "node:util";
-import { analyze } from "../src/core/analyze.js";
-import { TIDY_DIR, canonicalPath, isInsideDir, loadConfig } from "../src/core/config.js";
-import { executePlan, relativeToDest } from "../src/core/execute.js";
-import { bucketLabel, formatSize } from "../src/core/plan.js";
-import { undoLastRun } from "../src/core/undo.js";
+import {
+  TIDY_DIR,
+  analyze,
+  bucketLabel,
+  canonicalPath,
+  executePlan,
+  formatSize,
+  isInsideDir,
+  loadConfig,
+  relativeToDest,
+  undoLastRun,
+} from "../src/core/index.js";
 
 const HELP = `tidy — archive files, quarantine duplicates, set aside broken ones
 
 Usage:
   tidy [source folder] [options]  Tidy a folder (opens a folder picker when omitted)
-  tidy undo [--dest <dir>]        Undo the last run (for an in-place run, pass the source folder)
+  tidy undo [--dest <dir>] [options] Undo the last run (for an in-place run, pass the source folder)
 
 Options:
   --dest <dir>    Archive destination (asked at runtime when omitted; can also be fixed in the config)
+  --config <file> Use a JSON config file instead of the shared default
   --in-place, -p  Tidy in place: category folders are created inside the source folder
   --create-dest   Allow creating a destination that doesn't exist (otherwise you're asked first)
   --yes, -y       Skip the confirmation (the "create destination" prompt is still asked)
@@ -27,9 +35,10 @@ Options:
   --plain         Archive and byte-dedupe only: no near-duplicate, health or similar-image checks
   --help, -h      Show this help
 
-Layout: <prefix><Category>/[Subcategory]/[date]/ — the default ft_ prefix keeps tidy's output
+Layout: <prefix><Category>/[Subcategory]/[metadata]/[date]/ — the default ft_ prefix keeps tidy's output
 apart from folders you made yourself. Photos and videos are filed by year-month, documents by
-year, installers not by date at all; all of it is configurable.
+year, and audio by artist and album; all of it is configurable. Add custom suffixes under
+"extensions" and choose metadata folders with "groupBy" in the JSON config.
 
 Config: ~/.config/tidy/config.json`;
 
@@ -44,6 +53,7 @@ const PHASE_TEXT = {
   health: () => "Looking for broken files and OS junk…",
   similar: () => "Looking for near-duplicates…",
   perceptual: ({ files, done }) => (done || !files ? null : `Comparing ${files} images…`),
+  metadata: ({ files, done }) => (done || !files ? null : `Reading metadata for ${files} files…`),
   planning: () => "Building the plan…",
 };
 
@@ -78,6 +88,7 @@ async function main() {
   const { values: flags, positionals } = parseArgs({
     options: {
       dest: { type: "string" },
+      config: { type: "string" },
       "in-place": { type: "boolean", short: "p", default: false },
       "create-dest": { type: "boolean", default: false },
       yes: { type: "boolean", short: "y", default: false },
@@ -94,7 +105,7 @@ async function main() {
     return;
   }
 
-  const config = loadConfig();
+  const config = loadConfig(flags.config ? expandTilde(flags.config) : undefined);
   if (config._created) {
     console.log(styleText("dim", `Wrote a default config: ${config._path}`));
   } else if (config._staleCategories?.length) {
@@ -228,6 +239,10 @@ function formatError(err) {
   switch (err.code) {
     case "CONFIG_PARSE":
       return `Failed to parse the config file (${err.configPath}): ${err.cause?.message ?? ""}`;
+    case "CONFIG_INVALID":
+      return `Invalid classification rule at "${err.field}": ${err.reason}. Update your JSON config and try again`;
+    case "CONFIG_WRITE":
+      return `Could not save the config file (${err.configPath}): ${err.cause?.message ?? "Check that the location is writable"}`;
     case "EXDEV_VERIFY":
       return `Cross-volume copy verification failed: ${err.path}`;
     case "MANIFEST_CORRUPT":
@@ -275,7 +290,7 @@ function printPlan(entries, { destDir, fallbackCategory, counts }) {
       `\n  ${styleText("magenta", `Duplicates (${plural(dups.length, "file")}, identical content, quarantined)`)}`,
     );
     for (const e of dups) {
-      console.log(`    ${path.basename(e.to)}  ${styleText("dim", `↳ identical to: ${e.keeperPath}`)}`);
+      console.log(`    ${path.basename(e.to)}  ${styleText("dim", `Identical to: ${e.keeperPath}`)}`);
     }
   }
 
@@ -286,7 +301,7 @@ function printPlan(entries, { destDir, fallbackCategory, counts }) {
     for (const e of reviews) {
       const why = ISSUE_TEXT[e.issue] ?? e.issue;
       const detail = e.issue === "corrupt" ? ` (claims to be .${e.issueDetail})` : "";
-      console.log(`    ${path.basename(e.to)}  ${styleText("dim", `↳ ${why}${detail}`)}`);
+      console.log(`    ${path.basename(e.to)}  ${styleText("dim", `${why}${detail}`)}`);
     }
   }
 
@@ -316,11 +331,11 @@ function hints(entry) {
   if (entry.similar) {
     const what = SIMILAR_TEXT[entry.similar.reason] ?? entry.similar.reason;
     const peers = entry.similar.peers.map((p) => path.basename(p)).join(", ");
-    out.push(`↳ ${what}: ${peers}${entry.similar.best ? " (this one looks the most complete)" : ""}`);
+    out.push(`${what}: ${peers}${entry.similar.best ? " (this one looks the most complete)" : ""}`);
   }
   if (entry.perceptual) {
     const peers = entry.perceptual.peers.map((p) => path.basename(p)).join(", ");
-    out.push(`↳ looks nearly identical to: ${peers}${entry.perceptual.best ? " (largest of the set)" : ""}`);
+    out.push(`Looks nearly identical to: ${peers}${entry.perceptual.best ? " (largest of the set)" : ""}`);
   }
   return out;
 }
@@ -340,7 +355,7 @@ function reportUndo(result, destDir) {
       styleText("yellow", `Partial undo: ${restored} restored, ${failures.length} failed (the record is kept):`),
     );
     for (const f of failures) {
-      console.log(`  ${f.to} → ${f.from}: ${UNDO_FAILURE_TEXT[f.code] ?? f.message ?? f.code}`);
+      console.log(`  ${f.to} (original location: ${f.from}): ${UNDO_FAILURE_TEXT[f.code] ?? f.message ?? f.code}`);
     }
   }
   if (removedDirs.length) {

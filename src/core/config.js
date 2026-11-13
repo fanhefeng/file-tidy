@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { buildExtensionIndex } from "./rules.js";
 
 const CONFIG_PATH = resolveConfigPath();
 
@@ -8,7 +10,7 @@ const CONFIG_PATH = resolveConfigPath();
  * Windows: %APPDATA%\tidy\config.json; elsewhere: $XDG_CONFIG_HOME or
  * ~/.config (so the macOS path stays exactly where it always was).
  */
-function resolveConfigPath() {
+export function resolveConfigPath() {
   const base =
     process.platform === "win32"
       ? (process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"))
@@ -16,13 +18,53 @@ function resolveConfigPath() {
   return path.join(base, "tidy", "config.json");
 }
 
-const DEFAULT_CONFIG = {
+export const DEFAULT_CONFIG = {
   // null = ask at runtime (Enter defaults to the current working directory)
   dest: null,
   categories: {
-    Images: ["jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "raw", "dng", "tiff", "tif", "bmp", "avif"],
-    Videos: ["mp4", "mov", "avi", "mkv", "webm", "m4v", "wmv", "flv"],
-    Audios: ["mp3", "m4a", "wav", "flac", "aac", "ogg", "caf", "aiff", "wma"],
+    Images: [
+      "jpg",
+      "jpeg",
+      "png",
+      "heic",
+      "heif",
+      "gif",
+      "webp",
+      "raw",
+      "dng",
+      "tiff",
+      "tif",
+      "bmp",
+      "avif",
+      "svg",
+      "ico",
+      "cr2",
+      "cr3",
+      "nef",
+      "arw",
+      "orf",
+      "raf",
+    ],
+    Videos: ["mp4", "mov", "avi", "mkv", "webm", "m4v", "wmv", "flv", "mpeg", "mpg", "mts", "m2ts", "3gp"],
+    Audios: [
+      "mp3",
+      "m4a",
+      "wav",
+      "flac",
+      "aac",
+      "ogg",
+      "caf",
+      "aiff",
+      "aif",
+      "wma",
+      "opus",
+      "alac",
+      "ape",
+      "aifc",
+      "wv",
+      "m4b",
+      "amr",
+    ],
     Documents: [
       "pdf",
       "doc",
@@ -43,9 +85,60 @@ const DEFAULT_CONFIG = {
       "azw3",
       "azw",
     ],
-    Archives: ["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "dmg", "iso"],
+    Archives: [
+      "zip",
+      "rar",
+      "7z",
+      "tar",
+      "gz",
+      "bz2",
+      "xz",
+      "dmg",
+      "iso",
+      "pkg",
+      "exe",
+      "msi",
+      "apk",
+      "deb",
+      "rpm",
+      "tgz",
+      "zst",
+    ],
     Fonts: ["ttf", "otf", "ttc", "woff", "woff2", "eot"],
+    Code: [
+      "js",
+      "jsx",
+      "ts",
+      "tsx",
+      "mjs",
+      "cjs",
+      "py",
+      "rb",
+      "go",
+      "rs",
+      "java",
+      "kt",
+      "swift",
+      "c",
+      "cpp",
+      "h",
+      "hpp",
+      "cs",
+      "php",
+      "sh",
+      "html",
+      "css",
+      "scss",
+      "vue",
+      "svelte",
+      "sql",
+    ],
+    Data: ["json", "jsonl", "ndjson", "xml", "yaml", "yml", "toml", "ini", "sqlite", "sqlite3", "db", "parquet"],
+    Design: ["psd", "psb", "ai", "eps", "sketch", "fig", "xd", "blend", "obj", "fbx", "stl"],
   },
+  // Explicit overrides extend the built-ins without copying the entire map.
+  extensions: {},
+  groupBy: { Audios: ["artist", "album"] },
   fallbackCategory: "Others",
 
   // Prefix on every folder tidy creates ("ft_" = file-tidy), so its output is
@@ -65,6 +158,9 @@ const DEFAULT_CONFIG = {
     Audios: "none",
     Archives: "none",
     Fonts: "none",
+    Code: "none",
+    Data: "none",
+    Design: "none",
     Others: "none",
   },
 
@@ -123,7 +219,7 @@ export const TIDY_DIR = ".tidy";
  * never created an un-prefixed folder of these names, so an existing one in
  * destDir is the user's own and must never be adopted as tidy territory.
  */
-const POST_PREFIX_BASES = new Set([REVIEW_DIR, "Fonts"]);
+const POST_PREFIX_BASES = new Set([REVIEW_DIR, "Fonts", "Code", "Data", "Design"]);
 
 /**
  * Canonicalize a path for containment checks: resolve symlinks (macOS's
@@ -154,31 +250,32 @@ export function isInsideDir(parent, child) {
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
-export function loadConfig() {
-  if (!fs.existsSync(CONFIG_PATH)) {
-    fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2) + "\n");
-    return { ...structuredClone(DEFAULT_CONFIG), _created: true, _path: CONFIG_PATH };
+export function loadConfig(configPath = CONFIG_PATH) {
+  configPath = path.resolve(configPath);
+  if (!fs.existsSync(configPath)) {
+    return { ...saveConfig({}, configPath), _created: true };
   }
   let raw;
   try {
-    raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+    raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
   } catch (err) {
     // code + configPath let adapters render this in their own language.
-    const e = new Error(`Failed to parse config file (${CONFIG_PATH}): ${err.message}`, { cause: err });
+    const e = new Error(`Failed to parse config file (${configPath}): ${err.message}`, { cause: err });
     e.code = "CONFIG_PARSE";
-    e.configPath = CONFIG_PATH;
+    e.configPath = configPath;
     throw e;
   }
-  // JSON.parse happily returns a scalar, and a hand-emptied config file often
-  // holds exactly `null` — which would die on the first property read below.
-  // Anything that isn't an object carries no settings, so fall back to the
-  // defaults rather than making an unusable config fatal.
-  const settings = isPlainObject(raw) ? raw : {};
+  return { ...resolveConfig(raw), _path: configPath };
+}
+
+/** Pure configuration resolution shared by every adapter, including editors. */
+export function resolveConfig(raw = {}) {
+  // Preserve old empty/null files; reject malformed settings inside objects.
+  const settings = isPlainObject(raw) ? structuredClone(raw) : {};
+  validateConfig(settings);
   const config = {
     ...structuredClone(DEFAULT_CONFIG),
-    ...settings,
-    _path: CONFIG_PATH,
+    ...Object.fromEntries(Object.entries(settings).filter(([key]) => !key.startsWith("_"))),
   };
   // Whole-map settings: a user-supplied value replaces the default outright,
   // so removing a category/rule in the config actually removes it. Only a real
@@ -189,6 +286,10 @@ export function loadConfig() {
   // Keyed switches: merge, so writing one key doesn't silently reset the rest.
   // `detect: false` is the everything-off shorthand and passes through as-is.
   config.granularity = { ...DEFAULT_CONFIG.granularity, ...pick(settings.granularity) };
+  config.groupBy = { ...structuredClone(DEFAULT_CONFIG.groupBy), ...structuredClone(pick(settings.groupBy) ?? {}) };
+  config.extensions = Object.fromEntries(
+    Object.entries(settings.extensions ?? {}).map(([ext, rule]) => [normalizeExtension(ext), structuredClone(rule)]),
+  );
   config.detect = settings.detect === false ? false : { ...DEFAULT_CONFIG.detect, ...pick(settings.detect) };
   // Because categories replace rather than merge, a config written by an older
   // version silently misses categories added since. Report the gap so adapters
@@ -198,6 +299,163 @@ export function loadConfig() {
     ? Object.keys(DEFAULT_CONFIG.categories).filter((c) => !(c in settings.categories))
     : [];
   return config;
+}
+
+/** Validate before touching disk, then replace atomically so failed edits preserve the last valid file. */
+export function saveConfig(raw, configPath = CONFIG_PATH) {
+  const config = resolveConfig(raw);
+  configPath = path.resolve(configPath);
+  const serializable = Object.fromEntries(Object.entries(config).filter(([key]) => !key.startsWith("_")));
+  const temp = `${configPath}.${randomUUID()}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(temp, JSON.stringify(serializable, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+    fs.renameSync(temp, configPath);
+  } catch (cause) {
+    try {
+      fs.rmSync(temp, { force: true });
+    } catch {
+      /* Preserve the original write failure. */
+    }
+    const err = new Error(`Failed to write config file (${configPath})`, { cause });
+    err.code = "CONFIG_WRITE";
+    err.configPath = configPath;
+    throw err;
+  }
+  return { ...config, _path: configPath };
+}
+
+export const METADATA_FIELDS = ["artist", "albumArtist", "album", "title", "genre", "year"];
+const GRANULARITIES = new Set(["month", "year", "none"]);
+
+function invalid(field, reason) {
+  const err = new Error(`Invalid config field ${field}: ${reason}`);
+  err.code = "CONFIG_INVALID";
+  err.field = field;
+  err.reason = reason;
+  throw err;
+}
+
+function validFolder(value, field) {
+  if (
+    typeof value !== "string" ||
+    !value.trim() ||
+    value === "." ||
+    value === ".." ||
+    /[\\/<>:"|?*]|\p{Cc}|\p{Cf}/u.test(value) ||
+    value.toLowerCase() === TIDY_DIR ||
+    /[. ]$/.test(value) ||
+    /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(value)
+  )
+    invalid(field, "must be a safe folder name");
+  if ([DUPLICATES_DIR, REVIEW_DIR].some((reserved) => reserved.toLowerCase() === value.toLowerCase()))
+    invalid(field, "is reserved for quarantine");
+}
+
+function normalizeExtension(value) {
+  return value.toLowerCase().replace(/^\./, "");
+}
+
+function validExtension(value, field) {
+  if (
+    typeof value !== "string" ||
+    !/^[a-z0-9][a-z0-9_+-]*(?:\.[a-z0-9][a-z0-9_+-]*)*$/i.test(normalizeExtension(value))
+  )
+    invalid(field, "must be a file extension without wildcards or path separators");
+}
+
+function validGrouping(value, field) {
+  if (
+    !Array.isArray(value) ||
+    value.some((key) => !METADATA_FIELDS.includes(key)) ||
+    new Set(value).size !== value.length
+  )
+    invalid(field, `must be a list of unique metadata fields: ${METADATA_FIELDS.join(", ")}`);
+}
+
+function validateConfig(settings) {
+  for (const key of Object.keys(settings)) {
+    if (!Object.hasOwn(DEFAULT_CONFIG, key) && !["_path", "_created", "_staleCategories"].includes(key))
+      invalid(key, "is not a supported setting");
+  }
+  if ("dest" in settings && settings.dest !== null && typeof settings.dest !== "string")
+    invalid("dest", "must be a path or null");
+  if ("fallbackCategory" in settings) validFolder(settings.fallbackCategory, "fallbackCategory");
+  if (
+    "folderPrefix" in settings &&
+    (typeof settings.folderPrefix !== "string" || /[\\/<>:"|?*]|\p{Cc}|\p{Cf}/u.test(settings.folderPrefix))
+  )
+    invalid("folderPrefix", "must be a safe folder prefix");
+  for (const key of ["categories", "extensions", "granularity", "groupBy", "subCategories"]) {
+    if (key in settings && !isPlainObject(settings[key])) invalid(key, "must be an object");
+  }
+  for (const [category, exts] of Object.entries(settings.categories ?? {})) {
+    validFolder(category, `categories.${category}`);
+    if (!Array.isArray(exts)) invalid(`categories.${category}`, "must be a list of extensions");
+    exts.forEach((ext, i) => validExtension(ext, `categories.${category}[${i}]`));
+  }
+  const seen = new Set();
+  for (const [ext, rule] of Object.entries(settings.extensions ?? {})) {
+    validExtension(ext, `extensions.${ext}`);
+    const normalized = normalizeExtension(ext);
+    if (seen.has(normalized)) invalid(`extensions.${ext}`, "duplicates an extension after normalization");
+    seen.add(normalized);
+    if (typeof rule === "string") validFolder(rule, `extensions.${ext}`);
+    else {
+      if (!isPlainObject(rule)) invalid(`extensions.${ext}`, "must be a category or rule object");
+      for (const key of Object.keys(rule))
+        if (!["category", "groupBy", "granularity"].includes(key))
+          invalid(`extensions.${ext}.${key}`, "is not a supported rule setting");
+      validFolder(rule.category, `extensions.${ext}.category`);
+      if ("groupBy" in rule) validGrouping(rule.groupBy, `extensions.${ext}.groupBy`);
+      if ("granularity" in rule && !GRANULARITIES.has(rule.granularity))
+        invalid(`extensions.${ext}.granularity`, "must be month, year, or none");
+    }
+  }
+  for (const [category, value] of Object.entries(settings.granularity ?? {})) {
+    validFolder(category, `granularity.${category}`);
+    if (!GRANULARITIES.has(value)) invalid(`granularity.${category}`, "must be month, year, or none");
+  }
+  for (const [category, value] of Object.entries(settings.groupBy ?? {})) {
+    validFolder(category, `groupBy.${category}`);
+    validGrouping(value, `groupBy.${category}`);
+  }
+  for (const [category, rules] of Object.entries(settings.subCategories ?? {})) {
+    validFolder(category, `subCategories.${category}`);
+    if (!Array.isArray(rules)) invalid(`subCategories.${category}`, "must be a list of rules");
+    for (const [i, rule] of rules.entries()) {
+      const field = `subCategories.${category}[${i}]`;
+      if (!isPlainObject(rule)) invalid(field, "must be a rule object");
+      validFolder(rule.name, `${field}.name`);
+      if (rule.exts !== undefined) {
+        if (!Array.isArray(rule.exts)) invalid(`${field}.exts`, "must be a list of extensions");
+        rule.exts.forEach((ext, j) => validExtension(ext, `${field}.exts[${j}]`));
+      }
+      if (rule.match !== undefined) {
+        if (!Array.isArray(rule.match) || rule.match.some((source) => typeof source !== "string"))
+          invalid(`${field}.match`, "must be a list of regular expressions");
+        for (const source of rule.match)
+          try {
+            new RegExp(source, "i");
+          } catch {
+            invalid(`${field}.match`, "contains an invalid regular expression");
+          }
+      }
+    }
+  }
+  if ("detect" in settings && settings.detect !== false) {
+    if (!isPlainObject(settings.detect)) invalid("detect", "must be false or an object");
+    for (const [key, value] of Object.entries(settings.detect))
+      if (!Object.hasOwn(DEFAULT_CONFIG.detect, key) || typeof value !== "boolean")
+        invalid(`detect.${key}`, "must be a supported boolean switch");
+  }
+  if (
+    "perceptualThreshold" in settings &&
+    (!Number.isInteger(settings.perceptualThreshold) ||
+      settings.perceptualThreshold < 0 ||
+      settings.perceptualThreshold > 64)
+  )
+    invalid("perceptualThreshold", "must be an integer from 0 to 64");
 }
 
 function isPlainObject(value) {
@@ -282,7 +540,15 @@ function isDir(p) {
  */
 export function organizedDirNames(config) {
   const prefix = config.folderPrefix ?? "";
-  const bases = [...Object.keys(config.categories), config.fallbackCategory, DUPLICATES_DIR, REVIEW_DIR];
+  const bases = [
+    ...new Set([
+      ...Object.keys(config.categories),
+      ...Object.values(config.extensions ?? {}).map((rule) => (typeof rule === "string" ? rule : rule.category)),
+      config.fallbackCategory,
+      DUPLICATES_DIR,
+      REVIEW_DIR,
+    ]),
+  ];
   const names = new Set();
   for (const b of bases) {
     if (!prefix || !POST_PREFIX_BASES.has(b)) names.add(b);
@@ -312,12 +578,5 @@ export function quarantineDirNames(config) {
 
 /** Build a lowercase extension -> category lookup table. */
 export function buildExtIndex(config) {
-  const index = new Map();
-  for (const [category, exts] of Object.entries(config.categories)) {
-    // A hand-edited category holding a bare string would otherwise be iterated
-    // one character at a time, quietly filling the index with junk extensions.
-    if (!Array.isArray(exts)) continue;
-    for (const ext of exts) index.set(String(ext).toLowerCase().replace(/^\./, ""), category);
-  }
-  return index;
+  return buildExtensionIndex(config);
 }

@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # file-tidy
 
-CLI + Raycast 扩展，共用 `src/core`。扩展已上架 Raycast Store，提交走 fork（`fanhefeng/extensions`），每次提交新开一个 `ext/file-tidy-*` 分支，合并后由 Raycast 自动删除。
+CLI + Raycast 扩展 + Electron 桌面端，共用 `src/core/index.js` 入口。扩展已上架 Raycast Store，提交走 fork（`fanhefeng/extensions`），每次提交新开一个 `ext/file-tidy-*` 分支，合并后由 Raycast 自动删除。
 
 **动手前先读 [CONTRIBUTING.md](CONTRIBUTING.md)** —— 分层约定、语言约定、commit 规范、Store 提交流程与检查清单都在那里。
 
 ## 常用命令
 
-根目录用 pnpm，`raycast/` 目录用 npm（有自己的 `package-lock.json`）。Node >= 20.12。
+根目录用 pnpm，`raycast/` 目录用 npm（有自己的 `package-lock.json`）。Node 22.23.5 / 24.22.3 / 26.13.1 分支及更高补丁版本。
 
 ```bash
 pnpm test            # 全部测试 + 校验 raycast 副本未漂移（改完必跑）
@@ -30,19 +30,20 @@ cd raycast && npm run lint    # ray lint，Store 提交前必须全绿
 
 ## 架构
 
-一份纯逻辑 core，两个适配层：
+一份 core，三个适配层：
 
 - `src/core/` —— 唯一真源，纯 ESM JS，配手写 `.d.ts`。**改 core 导出签名时要同步改对应 `.d.ts`**。
+- `desktop/src/` —— Electron 适配层；React 渲染界面经 preload 调用主进程，后台线程调用共享核心。运行 `pnpm desktop:dev`，验证 `pnpm desktop:test`。
 - `bin/tidy.js` —— CLI 适配层：终端文案、参数解析、系统文件夹选择框。
 - `raycast/src/*.tsx` —— Raycast 适配层：表单与列表 UI。
 - `raycast/src/core/` 和 `raycast/tests/` 是 `scripts/sync.js` 的生成物，**改了会被覆盖**，且 `pnpm test` 会检出漂移并失败。要改就改 `src/core/` 和 `test/`，然后 `pnpm sync`。
 
-两端共用 `analyze.js` 这一个流水线入口，保证检测步骤与顺序不分叉：
+三端共用 `analyze.js` 这一个流水线入口，保证检测步骤与顺序不分叉：
 
 ```
 scan → health（先于 dedup：坏文件不参与去重）→ dedup（字节级：大小 → 头尾哈希 → SHA-256）
      → similar（文件名启发式，只标注）→ perceptual（图片感知哈希，缓存在 .tidy/，只标注）
-     → buildPlan
+     → metadata（按配置读取音频标签）→ buildPlan
 ```
 
 关键约定：
@@ -56,7 +57,7 @@ scan → health（先于 dedup：坏文件不参与去重）→ dedup（字节�
 
 ## 语言约定
 
-**代码、注释、测试描述、commit message、运行时输出一律英文**（Raycast 不支持 i18n，只收 US English）。中文只出现在根目录文档，以及识别中文文件名的匹配规则里（`config.js` 二级分类正则、`similar.js`/`dedup.js` 的副本/拷贝标记——那是功能数据，不是文案）。跟用户交流仍用中文。
+**代码、注释、测试描述、commit message、CLI 与 Raycast 运行时输出用英文；Electron 桌面界面按用户要求支持简体中文与英文**（Raycast 不支持 i18n，只收 US English）。中文只出现在根目录文档，以及识别中文文件名的匹配规则里（`config.js` 二级分类正则、`similar.js`/`dedup.js` 的副本/拷贝标记——那是功能数据，不是文案）。跟用户交流仍用中文。
 
 ## 测试约定
 
@@ -66,3 +67,5 @@ scan → health（先于 dedup：坏文件不参与去重）→ dedup（字节�
 ## Commit
 
 Conventional Commits，英文：`<type>(<scope>): <subject>`，scope 用 `core` | `cli` | `raycast` | `sync` | `docs`。正文写动机与取舍，不复述 diff。
+
+分类规则在 `rules.js` 做纯计算，音频 I/O 在 `metadata.js`，配置加载/校验/原子保存位于 `config.js`；新核心错误码也必须覆盖桌面端 `desktop/src/main/errors.ts`。UI 设计遵守 `desktop/DESIGN.md`，默认不使用装饰性箭头。

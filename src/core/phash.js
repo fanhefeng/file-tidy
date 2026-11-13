@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import exifr from "exifr";
+import { readExifThumbnail } from "./exif.js";
 import jpeg from "jpeg-js";
 import { PNG } from "pngjs";
 import { tidyPath } from "./config.js";
@@ -121,7 +121,7 @@ async function decodeGrey(file) {
   }
   // HEIC/RAW/etc, or a JPEG/PNG that failed to decode: try the EXIF thumbnail.
   try {
-    const thumb = await exifr.thumbnail(file.path);
+    const thumb = await readExifThumbnail(file.path);
     if (thumb) return decodeBuffer(Buffer.from(thumb), "jpg");
   } catch {
     // No thumbnail or unreadable container — give up on this file.

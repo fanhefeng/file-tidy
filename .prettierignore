@@ -12,3 +12,7 @@ raycast/raycast-env.d.ts
 pnpm-lock.yaml
 raycast/package-lock.json
 .tidy/
+
+desktop/out/
+desktop/release/
+desktop/package-lock.json

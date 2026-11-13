@@ -12,6 +12,8 @@ interface CoreError extends Error {
   segment?: string;
   destDir?: string;
   report?: string;
+  field?: string;
+  reason?: string;
 }
 
 const REPORT_LABEL: Record<string, string> = {
@@ -25,6 +27,16 @@ export function describeError(err: unknown, fallbackTitle: string): { title: str
   switch (e?.code) {
     case "CONFIG_PARSE":
       return { title: "Invalid config file", message: `${e.configPath} could not be parsed: ${cause ?? ""}` };
+    case "CONFIG_INVALID":
+      return {
+        title: "Invalid classification rule",
+        message: `Check “${e.field}” in your JSON config: ${e.reason}`,
+      };
+    case "CONFIG_WRITE":
+      return {
+        title: "Config could not be saved",
+        message: `${e.configPath} could not be written: ${cause ?? "Check that the location is writable"}`,
+      };
     case "INVALID_SEGMENT":
       return {
         title: "Invalid folder name in config",

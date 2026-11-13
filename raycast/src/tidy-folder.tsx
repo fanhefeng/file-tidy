@@ -17,10 +17,21 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import { useRef, useState } from "react";
-import { analyze, type AnalyzeCounts, type HashCacheState, type Phase } from "./core/analyze.js";
-import { canonicalPath, isInsideDir, loadConfig } from "./core/config.js";
-import { executePlan, relativeToDest } from "./core/execute.js";
-import { bucketLabel, formatSize, type PlanEntry } from "./core/plan.js";
+import {
+  analyze,
+  bucketLabel,
+  canonicalPath,
+  executePlan,
+  formatSize,
+  isInsideDir,
+  loadConfig,
+  relativeToDest,
+  resolveConfigPath,
+  type AnalyzeCounts,
+  type HashCacheState,
+  type Phase,
+  type PlanEntry,
+} from "./core/index.js";
 import { describeError } from "./errors.js";
 
 interface FormValues {
@@ -39,6 +50,7 @@ const PHASE_TEXT: Partial<Record<Phase, string | ((info: { files?: number; done?
   health: "Looking for broken files and OS junk…",
   similar: "Looking for near-duplicates…",
   perceptual: ({ files, done }) => (done ? `Comparing images (${done}/${files})…` : "Comparing images…"),
+  metadata: ({ files, done }) => (done ? `Reading metadata (${done}/${files})…` : "Reading audio metadata…"),
   planning: "Building the plan…",
 };
 
@@ -94,8 +106,21 @@ export default function TidyFolderCommand() {
   const [destError, setDestError] = useState<string | undefined>();
   const [inPlace, setInPlace] = useState(false);
   const [loading, setLoading] = useState(false);
+  const submittingRef = useRef(false);
+
+  async function editRules() {
+    try {
+      const configPath = resolveConfigPath();
+      if (!fs.existsSync(configPath)) loadConfig();
+      await open(configPath);
+    } catch (err) {
+      const { title, message } = describeError(err, "Could not open classification rules");
+      await showToast({ style: Toast.Style.Failure, title, message });
+    }
+  }
 
   async function handleSubmit(values: FormValues) {
+    if (submittingRef.current) return;
     const pickedSource = values.source[0];
     if (!pickedSource) {
       setSourceError("Pick a folder to tidy");
@@ -125,6 +150,7 @@ export default function TidyFolderCommand() {
       return;
     }
 
+    submittingRef.current = true;
     setLoading(true);
     const toast = await showToast({ style: Toast.Style.Animated, title: "Scanning…" });
     try {
@@ -166,6 +192,7 @@ export default function TidyFolderCommand() {
       toast.title = title;
       toast.message = message;
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   }
@@ -176,6 +203,7 @@ export default function TidyFolderCommand() {
       actions={
         <ActionPanel>
           <Action.SubmitForm title="Preview Tidy Plan" icon={Icon.MagnifyingGlass} onSubmit={handleSubmit} />
+          <Action title="Edit Classification Rules" icon={Icon.Gear} onAction={editRules} />
         </ActionPanel>
       }
     >
@@ -217,7 +245,7 @@ export default function TidyFolderCommand() {
         defaultValue={true}
         info="Near-duplicates and similar images are only flagged — they're still archived normally, and each run that flags any writes a report to .tidy/similar.md in the destination. Broken files and OS junk are moved to a review folder."
       />
-      <Form.Description text="You'll see the full plan first — nothing moves until you confirm." />
+      <Form.Description text="You'll see the full plan first — nothing moves until you confirm. Use “Edit Classification Rules” to customize formats and audio grouping in the shared JSON config." />
     </Form>
   );
 }
@@ -263,7 +291,7 @@ function PlanView({
         message:
           `${destMissing ? `Destination ${destDir} doesn't exist and will be created.\n` : ""}` +
           `Archive ${archives.length} files, quarantine ${dups.length} duplicates, ` +
-          `move ${reviews.length} to review → ${destDir}`,
+          `move ${reviews.length} to review. Destination: ${destDir}`,
         primaryAction: { title: "Tidy", style: Alert.ActionStyle.Default },
       });
       if (!ok) return;

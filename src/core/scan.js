@@ -51,8 +51,11 @@ function toSourceFile(full, name) {
     name,
     ext: path.extname(name).slice(1).toLowerCase(),
     size: stat.size,
+    ino: stat.ino,
+    dev: stat.dev,
     birthtime: realBirthtime(stat),
     mtime: stat.mtime,
+    mtimeMs: stat.mtimeMs,
   };
 }
 
@@ -90,51 +93,4 @@ function realBirthtime(stat) {
   return stat.birthtime.getTime() > 0 ? stat.birthtime : stat.mtime;
 }
 
-export function classify(file, extIndex, fallbackCategory) {
-  return extIndex.get(file.ext) ?? fallbackCategory;
-}
-
-/**
- * Compile config.subCategories into { category -> [{ name, test(file) }] }.
- * Invalid regex sources are dropped rather than thrown, so one bad hand-edited
- * rule can't break every run — callers get the rules that do compile.
- */
-export function buildSubIndex(subCategories = {}) {
-  const index = new Map();
-  for (const [category, rules] of Object.entries(subCategories)) {
-    if (!Array.isArray(rules)) continue;
-    const compiled = [];
-    for (const rule of rules) {
-      if (!rule?.name) continue;
-      const exts = new Set(list(rule.exts).map((e) => String(e).toLowerCase().replace(/^\./, "")));
-      const patterns = [];
-      for (const src of list(rule.match)) {
-        try {
-          patterns.push(new RegExp(src, "i"));
-        } catch {
-          // Skip an unparsable pattern; the rest of the rule still applies.
-        }
-      }
-      if (!exts.size && !patterns.length) continue;
-      compiled.push({
-        name: rule.name,
-        test: (file) => exts.has(file.ext) || patterns.some((re) => re.test(file.name)),
-      });
-    }
-    if (compiled.length) index.set(category, compiled);
-  }
-  return index;
-}
-
-/** A hand-edited rule can hold anything; only a real list is worth iterating. */
-function list(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-/** First matching sub-rule for the file's category, or null. */
-export function subClassify(file, category, subIndex) {
-  for (const rule of subIndex.get(category) ?? []) {
-    if (rule.test(file)) return rule.name;
-  }
-  return null;
-}
+export { classify, buildSubIndex, subClassify } from "./rules.js";
