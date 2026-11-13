@@ -53,7 +53,9 @@ tidy undo --dest ~/Archive          # 撤销上一次
 
 不传源文件夹会弹出系统文件夹选择框（macOS 用 osascript，Windows 用 PowerShell，Linux 用 zenity/kdialog）。完整选项见 `tidy --help`。
 
-需要受支持的 Node.js 22.23.4、24.22.1 或 26.12.1 分支及更高补丁版本。Node 20 已结束支持，不再作为安全支持和 CI 基线。
+当前仓库源码要求 Node.js 22.23.5、24.22.3 或 26.13.1 及各自主版本内的更高版本，与根目录 `package.json` 的 `engines.node` 一致。Node 20 已结束支持，不再作为本仓库的安全支持和 CI 基线。
+
+npm 已发布包可能滞后于仓库源码，其声明的运行要求请以所安装版本的 `package.json` 为准；即使旧包允许更低版本，也建议使用上述安全补丁或同一受支持分支的更新版本。
 
 ### Raycast 扩展
 
