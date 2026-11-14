@@ -3,6 +3,7 @@ import type { Locale } from "../locale";
 export const english = {
   organize: "Organize",
   rules: "Rules",
+  unsaved: "Unsaved",
   activity: "Activity",
   organizeTitle: "Organize files",
   organizeSubtitle: "Choose a folder to see how its files will be organized.",
@@ -190,6 +191,7 @@ export type MessageValues = Record<string, string | number>;
 export const chinese: Record<MessageKey, string> = {
   organize: "整理文件",
   rules: "分类规则",
+  unsaved: "未保存",
   activity: "整理记录",
   organizeTitle: "整理文件",
   organizeSubtitle: "选择一个文件夹，先看文件会被整理到哪里。",

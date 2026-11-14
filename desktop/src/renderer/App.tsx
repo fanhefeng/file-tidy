@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import type { Analysis, LastRun, PlanEntry, Progress, ReportReference, Settings, UndoFailure } from "../shared";
 import type { Locale } from "../locale";
 import { categoryLabel, dateLabel, numberLabel, translate, type MessageKey, type MessageValues } from "./i18n";
+import { protectUnsavedChanges } from "./unsaved-changes";
 import { RulesView } from "./RulesView";
 import { getCategorySummaries } from "./rule-model";
 import { ruleText } from "./rule-copy";
@@ -286,6 +287,7 @@ export default function App() {
   const sourceError = folderValidated.source && !sourceDir.trim();
   const destinationError = !inPlace && folderValidated.destination && !destDir.trim();
   const dirty = draft !== savedDraft;
+  useEffect(() => protectUnsavedChanges(window, dirty), [dirty]);
   const ready = Boolean(window.tidy);
   const t = (key: MessageKey, values?: MessageValues) => translate(locale, key, values);
   const count = (value: number) => numberLabel(locale, value);
@@ -614,7 +616,7 @@ export default function App() {
             >
               <Icon name={item.icon} size={16} />
               <span>{t(item.id)}</span>
-              {item.id === "rules" && dirty && <span className="unsaved-dot" />}
+              {item.id === "rules" && dirty && <span className="unsaved-label">{t("unsaved")}</span>}
             </button>
           ))}
         </nav>

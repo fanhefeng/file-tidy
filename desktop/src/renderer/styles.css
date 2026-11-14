@@ -2279,11 +2279,11 @@ img.brand-icon {
   margin-block: -1px;
   text-decoration: none;
 }
-.unsaved-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #b98628;
+.unsaved-label {
+  color: var(--secondary);
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 .folder-meta {
   display: flex;

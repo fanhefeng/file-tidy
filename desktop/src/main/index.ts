@@ -137,6 +137,25 @@ function createWindow() {
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  window.webContents.on("will-prevent-unload", (event) => {
+    if (!window || pending.size) return;
+    const zh = locale === "zh-CN";
+    const choice = dialog.showMessageBoxSync(window, {
+      type: "warning",
+      title: zh ? "规则尚未保存" : "Unsaved rules",
+      message: zh ? "放弃未保存的规则修改？" : "Discard unsaved rule changes?",
+      detail: zh
+        ? "继续编辑可保留草稿，保存后再退出。"
+        : "Keep editing to preserve your draft and save it before leaving.",
+      buttons: zh ? ["继续编辑", "放弃修改"] : ["Keep editing", "Discard changes"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    // Electron: cancelling this event allows the original close/quit/reload.
+    if (choice === 1) event.preventDefault();
+    else quitting = false;
+  });
   window.on("close", (event) => {
     if (pending.size) event.preventDefault();
   });

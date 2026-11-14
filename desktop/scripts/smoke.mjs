@@ -402,8 +402,19 @@ try {
   );
   assert.equal(fs.readFileSync(configPath, "utf8"), savedConfig);
   assert.ok(!(await devtools.evaluate(() => Boolean(document.querySelector(".notice-success")))));
+  await poll(() => document.querySelector(".unsaved-label")?.textContent === "Unsaved", "explicit unsaved status");
+  assert.equal(
+    await devtools.evaluate(() => window.dispatchEvent(new Event("beforeunload", { cancelable: true }))),
+    false,
+  );
+  await screenshot("rules-unsaved-en");
   await click(".editor-actions .button-secondary", "Discard changes");
-  await poll(() => !document.querySelector(".unsaved-dot"), "discarding the unsaved keyboard choice");
+  await poll(() => !document.querySelector(".unsaved-label"), "discarding the unsaved keyboard choice");
+  assert.equal(
+    await devtools.evaluate(() => window.dispatchEvent(new Event("beforeunload", { cancelable: true }))),
+    true,
+  );
+  checks.push("dirty rules block unload; discarding removes the blocker and explicit status");
   checks.push("Enter opens and selects rule choices; Escape preserves the value; selection does not save the form");
   await click("nav.view-tabs button:nth-child(1)");
   await type("#source-folder", sourceDir);
