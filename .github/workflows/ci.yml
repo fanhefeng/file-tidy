@@ -115,6 +115,9 @@ jobs:
         working-directory: desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - run: codesign --verify --deep --strict release/mac*/"File Tidy.app"
+        if: runner.os == 'macOS'
+        working-directory: desktop
       - uses: actions/upload-artifact@v7
         with:
           name: desktop-distribution-${{ matrix.os }}

@@ -3,7 +3,10 @@
   "version": "0.5.3",
   "private": true,
   "description": "A quiet workspace for organizing your files",
-  "author": "fhf1121",
+  "author": {
+    "name": "fhf",
+    "email": "28811207+fanhefeng@users.noreply.github.com"
+  },
   "license": "MIT",
   "type": "module",
   "main": "./out/main/index.js",
@@ -39,5 +42,6 @@
     "electron-vite": "^6.0.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.8"
-  }
+  },
+  "homepage": "https://github.com/fanhefeng/file-tidy"
 }

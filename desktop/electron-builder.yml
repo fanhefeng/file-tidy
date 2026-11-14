@@ -8,7 +8,8 @@ files:
   - out/**/*
   - package.json
 mac:
-  identity: null
+  # Integrity-only ad-hoc signature; this is not Developer ID signing or notarization.
+  identity: "-"
   icon: resources/icon.icns
   extraResources:
     - from: resources/icon-macos.png

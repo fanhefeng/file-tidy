@@ -172,7 +172,7 @@ gh api repos/raycast/extensions/pulls/<PR>/commits --jq '.[] | "\(.author.login)
 2. 运行 `pnpm test`、`pnpm format:check`、`pnpm desktop:test`，以及 `raycast/` 下的 lint/build。检查三平台 CI，完成打包应用的冒烟测试。
 3. CLI 用 `npm pack --dry-run` 检查包内容：包含 `bin/`、`src/`、类型声明和更新记录，不应带入桌面安装包或 Raycast 副本。发布候选包在临时目录安装后，实际完成一次预览、执行与撤销。
 4. Raycast 在 `raycast/CHANGELOG.md` 顶部新增一个 `{PR_MERGE_DATE}` 条目，按上面的 Store 流程提交。已发布条目逐字保留；本地漏回流的日期、图标或压缩截图先按上游恢复。
-5. 桌面端在各目标平台构建分发包。当前本地 macOS 构建明确禁用签名，正式分发的签名、公证和凭据按发行安排配置。
+5. 桌面端在各目标平台构建分发包。macOS 预览构建使用 ad-hoc 资源签名以保证包完整性，但不等于 Apple 开发者签名或公证；下载后可能被系统阻止。正式分发的开发者签名、公证和凭据按发行安排配置，不修改系统安全设置。
 6. 实际执行 npm 发布、Store 提交或桌面发行后，分别核对公开版本、合并记录和下载产物，再定稿对应更新记录及 tag。准备发行说明和生成本地包不代表已经对外发布。
 
 ## Electron 桌面端开发
