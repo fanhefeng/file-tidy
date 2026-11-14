@@ -95,6 +95,24 @@ const messages: Record<string, { en: Message; "zh-CN": Message }> = {
     en: () => "The rules changed. Preview again before organizing.",
     "zh-CN": () => "分类规则已发生变化，请重新预览后再整理。",
   },
+  PLAN_STALE: {
+    en: (e) =>
+      e.reason === "config"
+        ? "The rules changed. Preview again before organizing."
+        : e.reason === "destination"
+          ? "The selected destination changed. Check the folder and preview again before organizing."
+          : e.reason === "keeper"
+            ? "A duplicate's kept copy changed or is no longer available. Preview again before organizing."
+            : "A previewed file changed or is no longer available. Preview again before organizing.",
+    "zh-CN": (e) =>
+      e.reason === "config"
+        ? "分类规则已发生变化，请重新预览后再整理。"
+        : e.reason === "destination"
+          ? "整理后的存放位置已发生变化，请检查文件夹并重新预览后再整理。"
+          : e.reason === "keeper"
+            ? "重复文件的保留副本已发生变化或不存在，请重新预览后再整理。"
+            : "预览中的文件已发生变化或不存在，请重新预览后再整理。",
+  },
   PREVIEW_EXPIRED: {
     en: () => "This preview has expired. Preview the folder again.",
     "zh-CN": () => "此预览已失效，请重新预览文件夹。",
@@ -126,6 +144,15 @@ const messages: Record<string, { en: Message; "zh-CN": Message }> = {
   WINDOW_UNAVAILABLE: {
     en: () => "This operation is not available in this window.",
     "zh-CN": () => "无法在此窗口执行该操作。",
+  },
+  REPORT_UNAVAILABLE: {
+    en: () =>
+      "This report is no longer available. Check the destination folder or organize again to create a new report.",
+    "zh-CN": () => "这份说明已不存在或位置发生了变化，请检查整理后的文件夹，或重新整理生成说明。",
+  },
+  REPORT_OPEN_FAILED: {
+    en: () => "The report could not be opened. Choose an app that can open Markdown files and try again.",
+    "zh-CN": () => "无法打开这份说明，请为 Markdown 文件选择可用的打开方式后重试。",
   },
   OPERATION_FAILED: {
     en: () => "The operation could not be completed. Preview again; completed moves can be undone.",

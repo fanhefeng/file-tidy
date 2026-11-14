@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import type { Analysis, LastRun, PlanEntry, Progress, Settings } from "../shared";
+import type { Analysis, LastRun, PlanEntry, Progress, ReportReference, Settings, UndoFailure } from "../shared";
 import type { Locale } from "../locale";
 import { categoryLabel, dateLabel, numberLabel, translate, type MessageKey, type MessageValues } from "./i18n";
 import { RulesView } from "./RulesView";
@@ -8,7 +8,7 @@ import { ruleText } from "./rule-copy";
 import appIcon from "../../resources/icon.png";
 
 type View = "organize" | "rules" | "activity";
-type Busy = "choose" | "analyze" | "execute" | "undo" | "save" | "defaults" | "language";
+type Busy = "choose" | "analyze" | "execute" | "undo" | "save" | "defaults" | "language" | "report";
 type Activity = {
   id: string;
   time: string;
@@ -16,7 +16,8 @@ type Activity = {
   count: number;
   destination: string;
   manifestPath?: string;
-  failures?: number;
+  failures?: UndoFailure[];
+  similarReport?: ReportReference | null;
 };
 type Notice = { tone: "success" | "warning" | "error"; key?: MessageKey; values?: MessageValues; detail?: string };
 type IconName =
@@ -114,6 +115,7 @@ const busyKeys: Record<Busy, MessageKey> = {
   save: "busySave",
   defaults: "busyDefaults",
   language: "busyLanguage",
+  report: "busyReport",
 };
 const categoryColors: Record<string, string> = {
   Images: "violet",
@@ -154,6 +156,99 @@ function explanation(entry: PlanEntry): MessageKey | null {
   return null;
 }
 
+function SimilarDetails({ entry, locale }: { entry: PlanEntry; locale: Locale }) {
+  const t = (key: MessageKey) => translate(locale, key);
+  const reasonKeys: Record<NonNullable<PlanEntry["similar"]>["reason"], MessageKey> = {
+    "normalized-name": "similarNameReason",
+    "same-stem": "similarStemReason",
+    versioned: "similarVersionReason",
+  };
+  const groups = [
+    ...(entry.similar
+      ? [
+          {
+            ...entry.similar,
+            reasonKey: reasonKeys[entry.similar.reason],
+            newest: entry.similar.reason === "versioned",
+          },
+        ]
+      : []),
+    ...(entry.perceptual ? [{ ...entry.perceptual, reasonKey: "similarImageReason" as const, newest: false }] : []),
+  ];
+  if (!groups.length) return null;
+  return (
+    <div className="similar-details" data-testid="similar-files">
+      {groups.map((group) => (
+        <section key={group.reasonKey}>
+          <p>{t(group.reasonKey)}</p>
+          {group.best && <p>{t(group.newest ? "similarNewest" : "similarLargest")}</p>}
+          <ul>
+            {group.peers.map((peer) => (
+              <li key={peer} dir="auto">
+                <bdi>{peer}</bdi>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+      <p className="similar-advisory">{t("similarAdvisory")}</p>
+    </div>
+  );
+}
+
+function UndoFailures({ failures, locale }: { failures: UndoFailure[]; locale: Locale }) {
+  const t = (key: MessageKey) => translate(locale, key);
+  const reasons: Record<UndoFailure["code"], MessageKey> = {
+    missing: "undoMissing",
+    occupied: "undoOccupied",
+    error: "undoError",
+  };
+  const filesystemReasons: Record<string, MessageKey> = {
+    EACCES: "undoPermission",
+    EPERM: "undoPermission",
+    ENOSPC: "undoNoSpace",
+    ENOENT: "undoPathMissing",
+    EEXIST: "undoPathBlocked",
+    ENOTDIR: "undoPathBlocked",
+  };
+  return (
+    <section className="undo-failures" data-testid="undo-failures" aria-label={t("undoFailures")}>
+      <h4>{t("undoFailures")}</h4>
+      <ul>
+        {failures.map((failure) => (
+          <li key={`${failure.from}-${failure.to}`}>
+            <strong>
+              <bdi>{basename(failure.from)}</bdi>
+            </strong>
+            <p>
+              {t(
+                failure.code === "error"
+                  ? (filesystemReasons[failure.errorCode ?? ""] ?? "undoError")
+                  : reasons[failure.code],
+              )}
+            </p>
+            <dl>
+              <div>
+                <dt>{t("originalFolder")}</dt>
+                <dd>
+                  <bdi>{failure.from}</bdi>
+                </dd>
+              </div>
+              <div>
+                <dt>{t("undoArchivedLocation")}</dt>
+                <dd>
+                  <bdi>{failure.to}</bdi>
+                </dd>
+              </div>
+            </dl>
+            {locale === "en" && failure.message && <p className="filesystem-detail">{failure.message}</p>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export default function App() {
   const [view, setView] = useState<View>("organize");
   const [locale, setLocale] = useState<Locale>(() =>
@@ -178,11 +273,15 @@ export default function App() {
   const [selectedFile, setSelectedFile] = useState<PlanEntry | null>(null);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [lastRun, setLastRun] = useState<LastRun | null>(null);
+  const [lastRunState, setLastRunState] = useState<"loading" | "error" | "empty" | "ready">("empty");
+  const [lastRunError, setLastRunError] = useState("");
+  const [runRefresh, setRunRefresh] = useState(0);
   const [confirmUndo, setConfirmUndo] = useState<LastRun | null>(null);
   const operation = useRef(false);
   const alive = useRef(true);
   const sourceInput = useRef<HTMLInputElement>(null);
   const destinationInput = useRef<HTMLInputElement>(null);
+  const fileDetail = useRef<HTMLDivElement>(null);
   const destination = inPlace ? sourceDir : destDir;
   const sourceError = folderValidated.source && !sourceDir.trim();
   const destinationError = !inPlace && folderValidated.destination && !destDir.trim();
@@ -254,22 +353,37 @@ export default function App() {
   useEffect(() => {
     let current = true;
     setLastRun(null);
+    setLastRunError("");
+    setLastRunState(ready && destination ? "loading" : "empty");
     if (ready && destination && !busy)
       window.tidy
         .getLastRun(destination)
         .then((value) => {
-          if (current) setLastRun(value);
+          if (current) {
+            setLastRun(value);
+            setLastRunState(value ? "ready" : "empty");
+          }
         })
-        .catch(() => {
-          if (current) setLastRun(null);
+        .catch((error) => {
+          if (current) {
+            setLastRunError(errorText(error));
+            setLastRunState("error");
+          }
         });
     return () => {
       current = false;
     };
-  }, [destination, busy, ready]);
+  }, [destination, busy, ready, locale, runRefresh]);
   useEffect(() => {
     setPage(0);
   }, [filter, search]);
+  useEffect(() => {
+    if (!selectedFile) return;
+    const revealDetail = () => fileDetail.current?.scrollIntoView({ block: "nearest" });
+    revealDetail();
+    window.addEventListener("resize", revealDetail);
+    return () => window.removeEventListener("resize", revealDetail);
+  }, [selectedFile, locale]);
 
   const categorySummaries = useMemo(() => getCategorySummaries(settings?.config ?? {}), [settings?.config]);
   const totalFormats = categorySummaries.reduce((sum, category) => sum + category.extensions.length, 0);
@@ -369,6 +483,7 @@ export default function App() {
           count: result.moved,
           destination,
           manifestPath: result.manifestPath,
+          similarReport: result.similarReport,
         },
         ...items,
       ]);
@@ -378,6 +493,9 @@ export default function App() {
           : { tone: "success", key: "organizedNotice", values: { count: count(result.moved) } },
       );
     });
+  }
+  async function openReport(reportId: string) {
+    await run("report", () => window.tidy.openReport(reportId));
   }
   async function undo() {
     if (!confirmUndo) return;
@@ -400,13 +518,14 @@ export default function App() {
           count: result.restored,
           destination,
           failures: result.failures,
+          manifestPath,
         },
         ...items,
       ]);
       setNotice({
-        tone: result.failures ? "warning" : "success",
-        key: result.failures ? "restoreFailure" : "restoredNotice",
-        values: { count: count(result.restored), failures: count(result.failures) },
+        tone: result.failures.length ? "warning" : "success",
+        key: result.failures.length ? "restoreFailure" : "restoredNotice",
+        values: { count: count(result.restored), failures: count(result.failures.length) },
       });
     });
   }
@@ -776,7 +895,7 @@ export default function App() {
                 <p className="preview-advisory">{t("similarNotice", { count: count(similarCount) })}</p>
               )}
               {hasFiles ? (
-                <>
+                <div className="preview-results">
                   <div className="table-scroll">
                     <table className="file-table">
                       <thead>
@@ -828,7 +947,7 @@ export default function App() {
                             </td>
                             <td>
                               <span className="destination-path" dir="auto" title={entry.to}>
-                                {relativePath(entry, destination)}
+                                {relativePath(entry, analysis?.destDir ?? destination)}
                               </span>
                             </td>
                             <td>
@@ -848,7 +967,7 @@ export default function App() {
                     )}
                   </div>
                   {selectedFile && (
-                    <div className="file-detail">
+                    <div className="file-detail" ref={fileDetail}>
                       <Icon name="file" size={17} />
                       <dl>
                         <div>
@@ -881,6 +1000,14 @@ export default function App() {
                               </dd>
                             </div>
                           ))}
+                        {(selectedFile.similar || selectedFile.perceptual) && (
+                          <div>
+                            <dt>{t("similarFiles")}</dt>
+                            <dd>
+                              <SimilarDetails entry={selectedFile} locale={locale} />
+                            </dd>
+                          </div>
+                        )}
                       </dl>
                       <button
                         type="button"
@@ -916,7 +1043,7 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                </>
+                </div>
               ) : (
                 <div className={`empty-preview ${busy === "analyze" ? "is-loading" : ""}`}>
                   <div className="empty-glyph">
@@ -977,12 +1104,12 @@ export default function App() {
         />
         {view === "activity" && (
           <div className="activity-layout">
-            <section className="last-run-panel">
+            <section className="last-run-panel" data-testid="run-load-state" data-state={lastRunState}>
               <div className="panel-heading">
                 <h2>{t("savedRun")}</h2>
                 <Icon name="clock" size={17} />
               </div>
-              {lastRun ? (
+              {lastRunState === "ready" && lastRun ? (
                 <div className="last-run-content">
                   <div className="run-folder">
                     <span className="file-icon tone-blue">
@@ -1016,8 +1143,28 @@ export default function App() {
                     {t("undo")}
                   </button>
                 </div>
+              ) : lastRunState === "loading" ? (
+                <div className="activity-empty" role="status" data-testid="run-loading">
+                  <span className="loading-dot" />
+                  <p>{t("runLoading")}</p>
+                </div>
+              ) : lastRunState === "error" ? (
+                <div className="activity-empty activity-load-error" data-testid="run-load-error" role="alert">
+                  <Icon name="shield" size={28} />
+                  <h3>{t("runLoadError")}</h3>
+                  <p>{lastRunError}</p>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    data-testid="run-load-retry"
+                    disabled={Boolean(busy)}
+                    onClick={() => setRunRefresh((value) => value + 1)}
+                  >
+                    {t("retry")}
+                  </button>
+                </div>
               ) : (
-                <div className="activity-empty">
+                <div className="activity-empty" data-testid="run-empty">
                   <Icon name="clock" size={28} />
                   <h3>{t("noRunTitle")}</h3>
                   <p>{t("noRunDescription")}</p>
@@ -1074,8 +1221,41 @@ export default function App() {
                             <bdi>{item.manifestPath}</bdi>
                           </p>
                         )}
-                        {item.failures ? (
-                          <p>{t("restoreFailure", { count: count(item.count), failures: count(item.failures) })}</p>
+                        {item.similarReport && (
+                          <div className="activity-report">
+                            <p className="run-manifest">
+                              <span>{t("similarReport")}: </span>
+                              <bdi>{item.similarReport.path}</bdi>
+                            </p>
+                            <button
+                              type="button"
+                              className="button button-secondary"
+                              data-testid="open-similar-report"
+                              disabled={Boolean(busy)}
+                              onClick={() => openReport(item.similarReport!.id)}
+                            >
+                              {t("openSimilarReport")}
+                            </button>
+                          </div>
+                        )}
+                        {item.failures?.length ? (
+                          <>
+                            <p>
+                              {t("restoreFailure", { count: count(item.count), failures: count(item.failures.length) })}
+                            </p>
+                            <UndoFailures failures={item.failures} locale={locale} />
+                            {lastRun?.manifestPath === item.manifestPath && (
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                data-testid="undo-retry"
+                                disabled={Boolean(busy)}
+                                onClick={() => setConfirmUndo(lastRun)}
+                              >
+                                {t("undoRetry")}
+                              </button>
+                            )}
+                          </>
                         ) : null}
                         <time>{dateLabel(locale, item.time)}</time>
                       </div>

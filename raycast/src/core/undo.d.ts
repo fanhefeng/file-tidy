@@ -2,6 +2,8 @@ export interface UndoFailure {
   from: string;
   to: string;
   code: "missing" | "occupied" | "error";
+  /** Underlying filesystem errno for adapter-owned recovery guidance. */
+  errorCode?: string;
   message?: string;
 }
 export interface UndoResult {

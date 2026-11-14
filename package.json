@@ -45,7 +45,8 @@
     "desktop:dev": "npm --prefix desktop run dev",
     "desktop:build": "npm --prefix desktop run build",
     "desktop:package": "npm --prefix desktop run package",
-    "desktop:test": "npm --prefix desktop test"
+    "desktop:test": "npm --prefix desktop test",
+    "desktop:smoke": "npm --prefix desktop run test:smoke"
   },
   "dependencies": {
     "exifr": "^7.1.3",

@@ -12,6 +12,7 @@ export interface SourceFile {
   mtime: Date;
   /** Full timestamp precision for preview validation; Date truncates fractional milliseconds. */
   mtimeMs?: number;
+  ctimeMs?: number;
 }
 export interface CompiledSubRule {
   name: string;

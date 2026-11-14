@@ -786,6 +786,16 @@ img.brand-icon {
   overflow: auto;
   border-block: 1px solid var(--line);
 }
+.preview-results {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.preview-results > .table-scroll {
+  flex: 1 0 140px;
+}
 .file-table {
   width: 100%;
   border-collapse: collapse;
@@ -2452,6 +2462,25 @@ button.file-name:hover {
   font-family: var(--mono);
   overflow-wrap: anywhere;
 }
+.similar-details {
+  display: grid;
+  gap: 12px;
+  font-family: system-ui, sans-serif;
+}
+.similar-details p {
+  margin: 0 0 5px;
+}
+.similar-details ul {
+  display: grid;
+  gap: 5px;
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  font-family: var(--mono);
+}
+.similar-details .similar-advisory {
+  color: var(--secondary);
+}
 .table-empty h3 {
   margin-block: 8px 4px;
   font-size: 13px;
@@ -2605,6 +2634,51 @@ button.file-name:hover {
 }
 .activity-empty .button {
   margin-block-start: 7px;
+}
+.activity-empty p {
+  overflow-wrap: anywhere;
+}
+.activity-load-error > svg,
+.activity-load-error h3 {
+  color: var(--danger);
+}
+.activity-report,
+.undo-failures {
+  margin-block-start: 14px;
+}
+.activity-report .button,
+.undo-failures + .button {
+  margin-block-start: 10px;
+}
+.undo-failures h4 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 550;
+}
+.undo-failures ul {
+  display: grid;
+  gap: 16px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.undo-failures dl {
+  display: grid;
+  gap: 6px;
+  margin: 9px 0 0;
+}
+.undo-failures dt {
+  font-size: 10px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.undo-failures dd {
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.7;
+  color: var(--secondary);
+  margin: 1px 0 0;
+  overflow-wrap: anywhere;
 }
 .run-row time {
   display: block;

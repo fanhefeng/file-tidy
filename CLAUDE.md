@@ -18,6 +18,7 @@ node --test test/core.test.js                        # 只跑一个测试文件
 node --test --test-name-pattern="undo" test/*.js     # 按名字过滤单个测试
 pnpm sync            # src/core → raycast/src/core，test/ → raycast/tests
 pnpm sync:fork       # 再把 raycast/ 镜像到 Store fork（提交 PR 用）
+pnpm desktop:smoke   # 真实 Electron 窗口、桥接与文件操作冒烟
 pnpm format          # prettier --write
 ```
 
@@ -26,7 +27,7 @@ cd raycast && npm run dev     # ray develop 实时调试扩展
 cd raycast && npm run lint    # ray lint，Store 提交前必须全绿
 ```
 
-测试分工：`test/core.test.js` 覆盖归档/去重/移动/撤销，`test/smart.test.js` 覆盖检测流水线（health/similar/phash/analyze）。
+测试分工：`test/core.test.js` 覆盖归档/去重/移动/撤销，`test/smart.test.js` 覆盖检测流水线（health/similar/phash/analyze），`test/validation.test.js` 覆盖路径包含与预览快照，`test-adapters/cli.test.js` 覆盖真实确认期间的文件和配置变化。
 
 ## 架构
 
@@ -49,6 +50,7 @@ scan → health（先于 dedup：坏文件不参与去重）→ dedup（字节�
 关键约定：
 
 - **只有 `plan.js` 决定文件去向**，别处不要拼目标路径。新检测加进 `analyze.js` 编排，以 Map 喂给 `buildPlan`。
+- **执行保护统一在核心。** 三个适配层把 `analyze()` 返回的 `snapshot` 原样传入同次 `executePlan()`，覆盖源文件、重复 keeper、配置和根目录变化；`PLAN_STALE` 要求重新预览。执行器先检查整批实际路径，再创建记录，每次移动前重检最终落点；`PATH_ESCAPES` 不得退化成警告后继续移动。快照与 `_revision` 属于内部状态，不写入用户规则。
 - `execute.js` 执行移动并把运行清单写进目标目录 `.tidy/runs/`，`undo.js` 靠它撤销。它还在有标注时追加 `.tidy/similar.md`——`similar`/`perceptual` 不改去向，报告是这层分组关系唯一活过本次运行的地方。**报告里的 peers 必须重映射到移动后的落点**（记录时是移动前的路径，跟 `keeperPath` 同一类问题），文案照例归适配层的 `formatSimilarBlock`。
 - **移动之后的两次追加写（dup manifest 与 similar 报告）不许抛**。到那一步文件全都搬完了，抛出去等于把已完成的归档报成失败，还会诱使用户在已搬空的源目录上重试。失败以 `REPORT_WRITE` 进 `executePlan` 返回的 `reportErrors`，适配层按警告呈现；similar 写失败时 `similarReportPath` 保持 `null`，免得两端去邀请用户打开一份没写成的报告。
 - 判断路径包含关系必须先对两端 `canonicalPath`（字符串比较会被符号链接绕过，`undo.js` 栽过）；`.tidy` 下的路径一律走 `tidyPath()`，不要自己 `path.join`。

@@ -18,7 +18,8 @@
     "package": "npm run build && electron-builder",
     "package:dir": "npm run build && electron-builder --dir",
     "icon:macos": "node scripts/build-macos-icon.mjs",
-    "test": "npm run build && node --test tests/*.test.mjs"
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "test:smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "exifr": "^7.1.3",

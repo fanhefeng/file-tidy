@@ -31,7 +31,6 @@ const BASE = {
   },
   detect: { similar: false, health: false, perceptual: false },
   perceptualThreshold: 5,
-  _path: "(test)",
 };
 
 const cfg = (over = {}) => ({ ...structuredClone(BASE), ...over });
@@ -139,7 +138,7 @@ test("a config missing newer categories is reported, never silently patched", as
     }),
   );
 
-  // config.js resolves its path at module load, so run a child process with a patched XDG_CONFIG_HOME
+  // Isolate both platform-specific config homes before the child imports config.js.
   const { execFileSync } = await import("node:child_process");
   const script = `
     import { loadConfig } from ${JSON.stringify(new URL("../src/core/config.js", import.meta.url).href)};
@@ -147,7 +146,7 @@ test("a config missing newer categories is reported, never silently patched", as
     console.log(JSON.stringify({ stale: c._staleCategories, cats: Object.keys(c.categories) }));
   `;
   const out = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
-    env: { ...process.env, XDG_CONFIG_HOME: home },
+    env: { ...process.env, XDG_CONFIG_HOME: home, APPDATA: home },
     encoding: "utf8",
   });
   const { stale, cats } = JSON.parse(out.trim().split("\n").pop());
@@ -246,7 +245,7 @@ test("hand-edited config: a file holding nothing but null falls back to the defa
   // leave behind. Every property read used to die on it with a bare TypeError.
   fs.writeFileSync(cfgPath, "null");
 
-  // config.js resolves its path at module load, so run a child process with a patched XDG_CONFIG_HOME
+  // Isolate both platform-specific config homes before the child imports config.js.
   const { execFileSync } = await import("node:child_process");
   const script = `
     import { loadConfig } from ${JSON.stringify(new URL("../src/core/config.js", import.meta.url).href)};
@@ -254,7 +253,7 @@ test("hand-edited config: a file holding nothing but null falls back to the defa
     console.log(JSON.stringify({ cats: Object.keys(c.categories), prefix: c.folderPrefix, stale: c._staleCategories }));
   `;
   const out = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
-    env: { ...process.env, XDG_CONFIG_HOME: home },
+    env: { ...process.env, XDG_CONFIG_HOME: home, APPDATA: home },
     encoding: "utf8",
   });
   const { cats, prefix, stale } = JSON.parse(out.trim().split("\n").pop());

@@ -16,7 +16,7 @@ test/            核心逻辑测试（node:test）
 
 三条不可破的约定：
 
-1. **core 不说话。** 它只返回数据，出错时抛带 `code` 的错误（`CONFIG_PARSE`、`INVALID_SEGMENT`、`TIDY_DIR_ESCAPES`、`EXDEV_VERIFY`、`MANIFEST_CORRUPT`），措辞归适配层。文案位于 CLI 的 `formatError`（`bin/tidy.js`）、扩展的 `describeError`（`raycast/src/errors.ts`）和桌面端 `describeError`（`desktop/src/main/errors.ts`）。**新增错误码时三处都要补**，否则 core 的原始英文会直接漏给用户。core 里任何 `throw` 都必须带 `code`，裸 `new Error` 等于绕过这条约定。
+1. **core 不说话。** 它只返回数据，出错时抛带 `code` 的错误（包括 `CONFIG_PARSE`、`INVALID_SEGMENT`、`TIDY_DIR_ESCAPES`、`PATH_ESCAPES`、`PLAN_STALE`、`EXDEV_VERIFY`、`MANIFEST_CORRUPT`），措辞归适配层。文案位于 CLI 的 `formatError`（`bin/tidy.js`）、扩展的 `describeError`（`raycast/src/errors.ts`）和桌面端 `describeError`（`desktop/src/main/errors.ts`）。**新增错误码时三处都要补**，否则 core 的原始英文会直接漏给用户。core 里任何 `throw` 都必须带 `code`，裸 `new Error` 等于绕过这条约定。
    - 唯一不抛的错误码是 `REPORT_WRITE`：它只描述**最后一个文件移动完成之后**的追加写失败（`ft_Duplicates/manifest.md` 与 `.tidy/similar.md`）。这时丢的是记录不是文件，抛出去会把一次已经完成的归档报成失败，还会诱使用户在已经搬空的源目录上重试。所以它走 `executePlan` 返回值里的 `reportErrors`，由适配层当**警告**呈现——同样三个适配层都要有文案。
 2. **`plan.js` 是唯一决定文件去向的地方。** 不要在别处拼目标路径。新增检测请加进 `analyze.js` 的编排，以 Map 形式喂给 `buildPlan`。
    - 与之配套：**判断路径是否在某个目录内，必须先 `canonicalPath` 两端**（`isInsideDir` 的注释写着这条前提）。只比较字符串会被中间某段的符号链接绕过——`undo.js` 曾经栽在这里。`.tidy` 下的任何路径一律走 `tidyPath()`，不要自己 `path.join(destDir, ".tidy", …)`。
@@ -79,17 +79,18 @@ pnpm test        # 跑测试 + 校验 raycast 副本未漂移
 
 ### CI
 
-`.github/workflows/ci.yml` 在推 `main` 和开 PR 时跑三个 job：
+`.github/workflows/ci.yml` 在推 `main` 和开 PR 时跑四组检查：
 
-| job       | 内容                                                   | 为什么                                                                                                                              |
-| --------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `test`    | 测试 + `sync --check`，Node 22.23.5 / 24.22.3 两个版本 | Node 20 已结束支持；两个受支持分支均固定到安全补丁基线。`sync --check` 一并在这里跑，**改了 `src/core/` 忘记 `pnpm sync` 会被拦下** |
-| `format`  | `pnpm format:check`                                    | 保证仓库始终是 Prettier 格式，避免格式改动混进功能 diff                                                                             |
-| `raycast` | `raycast/` 下 `npm ci` + `npm run lint`                | 跟 Store 提交时跑的是同一个 `ray lint`，让 lint 失败止步于本仓库，不流到 fork                                                       |
+| job       | 内容                                                                                               | 为什么                                                                                     |
+| --------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `test`    | Ubuntu 上 Node 22.23.5 / 24.22.3 / 26.13.1，macOS / Windows 上 Node 26.13.1；测试 + `sync --check` | 覆盖声明支持的 Node 分支和三种文件系统平台；**改了 `src/core/` 忘记 `pnpm sync` 会被拦下** |
+| `format`  | `pnpm format:check`                                                                                | 保证仓库始终是 Prettier 格式，避免格式改动混进功能 diff                                    |
+| `raycast` | `raycast/` 下 `npm ci` + `npm run lint` + `npm run build`                                          | Store lint 与类型检查、分发构建均须通过；产物写入本项目 `dist/`                            |
+| `desktop` | 三平台 `npm test`、未安装目录打包和真实应用冒烟测试                                                | 验证渲染界面、preload、IPC、后台线程以及实际文件移动和撤销；保留截图与失败日志             |
 
 `raycast` job 用 npm 而不是 pnpm——扩展目录自包含、有自己的 `package-lock.json`，Store CI 也只认 npm。
 
-`test` job 在 Node 22.23.5 上安装依赖，再切换到被测版本直接用 `node --test` 跑。依赖全是纯 JS，没有需要重编译的原生模块。Node 22.23.5 和 24.22.3 均满足 pnpm 11 的运行要求。
+测试使用临时目录。需要读取默认配置路径的子进程必须同时隔离 `XDG_CONFIG_HOME` 和 `APPDATA`；Windows 的目录链接测试使用 junction，避免依赖创建符号链接的系统权限。桌面冒烟测试还隔离 Electron 的用户数据目录，不读取或覆盖用户的真实规则与语言偏好。
 
 ## 提交到 Raycast Store
 
@@ -165,10 +166,14 @@ gh api repos/raycast/extensions/pulls/<PR>/commits --jq '.[] | "\(.author.login)
 
 ## 发版
 
-1. 更新 `package.json` 的 `version`（语义化版本）
-2. 在 `CHANGELOG.md` 顶部加版本条目，写清行为变化与迁移影响
-3. `raycast/CHANGELOG.md` 单独加一条，只写面向扩展用户的变化
-4. commit：`chore(release): 0.6.0`
+三个渠道分别交付。2026-11-13 核对 npm `latest` 为 `0.5.2`，本地 `package.json` 和桌面端候选版本为 `0.5.3`；候选记录保留在「未发布」，对外发布后再定稿日期。可用 `npm view @fanhefeng/file-tidy version dist-tags --json` 重新核对，不能仅根据本地版本推断已发布。
+
+1. 更新根目录与 `desktop/package.json` 的候选版本，保持相应锁文件一致；在根 `CHANGELOG.md` 写清行为变化和迁移影响。
+2. 运行 `pnpm test`、`pnpm format:check`、`pnpm desktop:test`，以及 `raycast/` 下的 lint/build。检查三平台 CI，完成打包应用的冒烟测试。
+3. CLI 用 `npm pack --dry-run` 检查包内容：包含 `bin/`、`src/`、类型声明和更新记录，不应带入桌面安装包或 Raycast 副本。发布候选包在临时目录安装后，实际完成一次预览、执行与撤销。
+4. Raycast 在 `raycast/CHANGELOG.md` 顶部新增一个 `{PR_MERGE_DATE}` 条目，按上面的 Store 流程提交。已发布条目逐字保留；本地漏回流的日期、图标或压缩截图先按上游恢复。
+5. 桌面端在各目标平台构建分发包。当前本地 macOS 构建明确禁用签名，正式分发的签名、公证和凭据按发行安排配置。
+6. 实际执行 npm 发布、Store 提交或桌面发行后，分别核对公开版本、合并记录和下载产物，再定稿对应更新记录及 tag。准备发行说明和生成本地包不代表已经对外发布。
 
 ## Electron 桌面端开发
 
@@ -178,7 +183,10 @@ gh api repos/raycast/extensions/pulls/<PR>/commits --jq '.[] | "\(.author.login)
 npm --prefix desktop ci
 pnpm desktop:dev
 pnpm desktop:test
+pnpm desktop:smoke
 pnpm desktop:package
 ```
 
-主进程只暴露明确的 preload 方法，后台线程持有计划，界面只能提交计划 ID；所有文件目标路径仍由核心 `plan.js` 决定。变更目录、选项或保存配置后应重新预览。界面遵守 [desktop/DESIGN.md](desktop/DESIGN.md)：浅色、清晰字级、克制奶油黄强调，默认无装饰性箭头，交互保留键盘聚焦状态。
+主进程只暴露明确的 preload 方法，后台线程持有计划，界面只能提交计划 ID；所有文件目标路径仍由核心 `plan.js` 决定。三个适配层必须将 `analyze()` 的 `snapshot` 原样传给同一次计划的 `executePlan()`；不得自行拼接快照或只检查源文件而漏掉保留副本、配置和根目录。低层手工计划可不传快照，但仍经过目标包含关系检查。Node 的路径检查与移动之间仍有竞态窗口，不能宣称消除了操作系统层面的链接替换竞态。
+
+变更目录、选项或保存配置后应重新预览。界面遵守 [desktop/DESIGN.md](desktop/DESIGN.md)，默认无装饰性箭头，交互保留键盘聚焦状态。

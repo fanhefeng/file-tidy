@@ -180,6 +180,63 @@ test("a record that can't be written leaves the run a success", async () => {
   }
 });
 
+for (const [report, externalExists] of [
+  ["similar", true],
+  ["duplicates", true],
+  ["similar", false],
+  ["duplicates", false],
+]) {
+  test(`a ${report} report linked outside the destination warns without changing the ${externalExists ? "existing" : "missing"} external file`, async (t) => {
+    const src = tmp();
+    const dest = tmp();
+    const outside = tmp();
+    const external = path.join(outside, "private.md");
+    if (externalExists) fs.writeFileSync(external, "external content must stay unchanged");
+    const first = write(src, "note.txt", "same content");
+    const second = write(src, "note copy.txt", report === "duplicates" ? "same content" : "another revision");
+    const entries = await plan(src, dest);
+    if (report === "similar") {
+      for (const item of entries)
+        item.similar = {
+          reason: "normalized-name",
+          peers: [item.from === first ? second : first],
+          best: item.from === first,
+        };
+    }
+    const target =
+      report === "similar" ? path.join(dest, ".tidy", "similar.md") : path.join(dest, "Duplicates", "manifest.md");
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    try {
+      fs.symlinkSync(external, target, "file");
+    } catch (error) {
+      if (process.platform === "win32" && ["EPERM", "ENOTSUP"].includes(error.code)) {
+        t.skip("This Windows runner does not allow file symlinks");
+        return;
+      }
+      throw error;
+    }
+
+    const result = executePlan(entries, { sourceDir: src, destDir: dest });
+    assert.equal(result.moved.length, 2);
+    assert.equal(result.similarReportPath, null);
+    if (externalExists) assert.equal(fs.readFileSync(external, "utf8"), "external content must stay unchanged");
+    else assert.ok(!fs.existsSync(external), "the report must not create the external symlink target");
+    assert.equal(result.reportErrors.length, 1);
+    assert.equal(result.reportErrors[0].code, "REPORT_WRITE");
+    assert.equal(result.reportErrors[0].report, report);
+    assert.equal(result.reportErrors[0].path, target);
+    assert.deepEqual(fs.readdirSync(src), []);
+    for (const item of result.moved) assert.ok(fs.existsSync(item.to));
+    const undone = undoLastRun(dest);
+    assert.equal(undone.restored, 2);
+    assert.deepEqual(undone.failures, []);
+    assert.equal(fs.readFileSync(first, "utf8"), "same content");
+    assert.equal(fs.readFileSync(second, "utf8"), report === "duplicates" ? "same content" : "another revision");
+    if (externalExists) assert.equal(fs.readFileSync(external, "utf8"), "external content must stay unchanged");
+    else assert.ok(!fs.existsSync(external));
+  });
+}
+
 test("a run with nothing flagged writes no similar report", () => {
   const src = tmp();
   const dest = tmp();
@@ -409,7 +466,7 @@ test("a .tidy folder symlinked out of the destination is refused, not followed",
   fs.mkdirSync(dest, { recursive: true });
   fs.mkdirSync(src, { recursive: true });
   fs.mkdirSync(elsewhere, { recursive: true });
-  fs.symlinkSync(elsewhere, path.join(dest, ".tidy"));
+  fs.symlinkSync(elsewhere, path.join(dest, ".tidy"), process.platform === "win32" ? "junction" : "dir");
   write(src, "a.txt", "x");
 
   const entries = [
@@ -436,7 +493,7 @@ test("refuses a manifest reached through a symlinked runs folder, leaving the fo
   fs.mkdirSync(path.join(dest, ".tidy"), { recursive: true });
   fs.mkdirSync(src, { recursive: true });
   fs.mkdirSync(elsewhere, { recursive: true });
-  fs.symlinkSync(elsewhere, path.join(dest, ".tidy", "runs"));
+  fs.symlinkSync(elsewhere, path.join(dest, ".tidy", "runs"), process.platform === "win32" ? "junction" : "dir");
   write(dest, "Documents/victim.txt", "archived earlier");
 
   const planted = path.join(elsewhere, "planted.json");
@@ -473,7 +530,7 @@ test("refuses a manifest that reaches outside through a symlinked folder, and to
   fs.mkdirSync(path.join(outside, "leftover"), { recursive: true });
   fs.writeFileSync(path.join(outside, "secret.txt"), "not part of any tidy run");
   // A folder inside destDir that really lives somewhere else.
-  fs.symlinkSync(outside, path.join(dest, "ft_Images"));
+  fs.symlinkSync(outside, path.join(dest, "ft_Images"), process.platform === "win32" ? "junction" : "dir");
 
   fs.writeFileSync(
     path.join(dest, ".tidy", "runs", "symlinked.json"),
@@ -560,4 +617,29 @@ test("isInsideDir and canonicalPath", () => {
   assert.equal(isInsideDir(path.join(t, "sub"), t), false);
   // A path that doesn't exist yet: canonicalize the deepest existing ancestor, re-append the rest
   assert.equal(canonicalPath(path.join(t, "nope", "deep")), path.join(canonicalPath(t), "nope", "deep"));
+});
+
+test("undo keeps the archived file and exposes the filesystem error when its original parent is now a file", async () => {
+  const src = tmp();
+  const dest = tmp();
+  const from = write(src, "sub/note.txt", "archived content");
+  const entries = await plan(src, dest, { recursive: true });
+  executePlan(entries, { sourceDir: src, destDir: dest });
+  const to = entries[0].to;
+  fs.rmdirSync(path.join(src, "sub"));
+  fs.writeFileSync(path.join(src, "sub"), "a separate file");
+
+  const result = undoLastRun(dest);
+  assert.equal(result.restored, 0);
+  assert.equal(result.retired, false);
+  assert.equal(result.failures.length, 1);
+  const [failure] = result.failures;
+  assert.equal(failure.code, "error");
+  assert.equal(failure.from, from);
+  assert.equal(failure.to, to);
+  assert.ok(["EEXIST", "ENOTDIR"].includes(failure.errorCode));
+  assert.equal(typeof failure.message, "string");
+  assert.equal(fs.readFileSync(to, "utf8"), "archived content");
+  assert.equal(fs.readFileSync(path.join(src, "sub"), "utf8"), "a separate file");
+  assert.ok(fs.existsSync(result.manifestPath));
 });

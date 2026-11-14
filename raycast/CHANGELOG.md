@@ -1,10 +1,17 @@
 # File Tidy Changelog
 
-## [Fix EXIF File Handles] - {PR_MERGE_DATE}
+## [Safer Previews and Shared Classification Rules] - {PR_MERGE_DATE}
 
+- Reject folder links that would move files outside the selected destination, checking the entire plan before any file moves.
+- Require a new preview if source files, duplicate keepers, selected folders, or classification rules change during analysis or before confirmation.
+- Share validated classification rules with the CLI and desktop app, including custom and compound extensions, additional built-in formats, and embedded audio tags for artist, album, title, genre, and year grouping.
 - Close metadata and thumbnail file readers on success and failure, preserving embedded capture dates and thumbnails.
 
-## [New Icon, and Previews That Leave No Trace] - {PR_MERGE_DATE}
+## [New Icon] - 2026-09-15
+
+- A refreshed extension icon: a mint tray on a deep-green gradient, redrawn with the Raycast Icon Maker.
+
+## [New Icon, and Previews That Leave No Trace] - 2026-08-18
 
 - A refreshed extension icon, with the Store screenshots re-shot to match.
 - Previewing a plan no longer writes anything to the destination. The perceptual-hash cache used by similar-image detection was saved during analysis — before you confirm anything — which could create the destination folder (and a `.tidy` folder inside it) just for looking at a plan. The cache is now written only after a run completes, keyed by where each image actually landed.

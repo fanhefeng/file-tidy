@@ -15,6 +15,7 @@ const bridge: TidyBridge = {
   chooseDirectory: () => invoke("chooseDirectory"),
   analyze: (input) => invoke("analyze", input),
   execute: (id) => invoke("execute", id),
+  openReport: (id) => invoke("openReport", id),
   undo: (destDir, manifestPath) => invoke("undo", { destDir, manifestPath }),
   getLastRun: (destDir) => invoke("getLastRun", destDir),
   saveConfig: (json) => invoke("saveConfig", json),

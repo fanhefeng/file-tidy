@@ -23,6 +23,8 @@ Use white surfaces and spacing to separate regions. Do not nest decorative cards
 - Menus, language controls, fields, filters, pagination, execution, and undo have visible keyboard focus. Disabled controls remain identifiable. Native checkboxes/switches expose their checked state.
 - Text inputs, search, and the JSON editor use one fine neutral bottom line for focus, not an outer rectangular outline. Composite folder/search fields draw the line on the filled control as a whole; their nested input must not draw a second indicator. Invalid fields use the error color for the same line. Keep button/choice keyboard focus and a system-colored outline for text input in forced-color mode.
 - Feedback reflects actual analysis or execution. Never fabricate sample files, counts, activity, timers, or progress.
+- Activity distinguishes loading, no saved record, and a read failure. Read failures retain an explanation and an explicit retry. Partial undo lists each file, original and archived locations, and a localized reason; a retry still identifies and confirms the saved run.
+- Similar-file details list the related paths and explain the name or image heuristic. Suggested copies never imply proof of identical content. A completed run may offer its generated report using a text action.
 - Classification previews are read-only. Execution uses an explicit action after the destinations are visible. Undo confirmation remains inline and identifies the run.
 - Loading, success, warning, failure, empty, hover, active, selected, and disabled states use the same color vocabulary. Motion is short and functional; reduced-motion and forced-color preferences remain usable.
 

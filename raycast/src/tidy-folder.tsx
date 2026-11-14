@@ -31,6 +31,7 @@ import {
   type HashCacheState,
   type Phase,
   type PlanEntry,
+  type PlanSnapshot,
 } from "./core/index.js";
 import { describeError } from "./errors.js";
 
@@ -156,7 +157,7 @@ export default function TidyFolderCommand() {
     try {
       const config = loadConfig();
       if (!values.smart) config.detect = false;
-      const { entries, sourceFiles, counts, hashCache } = await analyze({
+      const { entries, sourceFiles, counts, hashCache, snapshot } = await analyze({
         sourceDir,
         destDir,
         config,
@@ -184,7 +185,14 @@ export default function TidyFolderCommand() {
         });
       }
       push(
-        <PlanView entries={entries} counts={counts} sourceDir={sourceDir} destDir={destDir} hashCache={hashCache} />,
+        <PlanView
+          entries={entries}
+          counts={counts}
+          sourceDir={sourceDir}
+          destDir={destDir}
+          hashCache={hashCache}
+          snapshot={snapshot}
+        />,
       );
     } catch (err) {
       const { title, message } = describeError(err, "Scan failed");
@@ -256,12 +264,14 @@ function PlanView({
   sourceDir,
   destDir,
   hashCache,
+  snapshot,
 }: {
   entries: PlanEntry[];
   counts: AnalyzeCounts;
   sourceDir: string;
   destDir: string;
   hashCache: HashCacheState | null;
+  snapshot: PlanSnapshot | null;
 }) {
   // A ref, not the state flag: two Enter presses land in the same render pass,
   // and both would still see `executing === false`.
@@ -301,6 +311,7 @@ function PlanView({
         destDir,
         sourceDir,
         hashCache,
+        snapshot,
         formatSimilarBlock,
       });
       toast.style = Toast.Style.Success;

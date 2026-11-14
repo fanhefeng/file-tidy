@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
@@ -7,6 +7,8 @@ import { describeError, desktopError } from "./errors.js";
 import { readPreferences, writePreferences } from "./preferences.js";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
+const userDataDirectory = app.commandLine.getSwitchValue("user-data-dir");
+if (path.isAbsolute(userDataDirectory)) app.setPath("userData", userDataDirectory);
 let window: BrowserWindow | null = null;
 let worker: Worker | null = null;
 let serial = 0;
@@ -163,7 +165,7 @@ else {
     }
     locale = readPreferences(preferencesPath(), app.getLocale()).locale;
     updateMenu();
-    for (const method of [...methods, "chooseDirectory", "getPreferences", "setLocale"]) {
+    for (const method of [...methods, "chooseDirectory", "getPreferences", "setLocale", "openReport"]) {
       ipcMain.handle(`tidy:${method}`, async (event, input) => {
         if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) {
           return { ok: false, error: describeError(desktopError("WINDOW_UNAVAILABLE"), locale) };
@@ -183,6 +185,14 @@ else {
               properties: ["openDirectory", "createDirectory"],
             });
             return { ok: true, value: result.canceled ? null : result.filePaths[0] };
+          }
+          if (method === "openReport") {
+            const report = (await request("resolveReport", input)) as
+              { ok: true; value: string } | { ok: false; error: string };
+            if (!report.ok) return report;
+            const failure = await shell.openPath(report.value);
+            if (failure) throw desktopError("REPORT_OPEN_FAILED");
+            return { ok: true, value: null };
           }
           return await request(method, input);
         } catch (error) {

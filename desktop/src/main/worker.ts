@@ -18,17 +18,40 @@ import { describeError, describeReportError, desktopError } from "./errors.js";
 import { isLocale } from "../locale.js";
 
 type AnalysisResult = Awaited<ReturnType<typeof analyze>>;
-type Fingerprint = { size: number; mtime: number; ino: number; dev: number };
 let preview: {
   id: string;
   sourceDir: string;
   destDir: string;
-  configText: string;
   result: AnalysisResult;
-  files: Map<string, Fingerprint>;
 } | null = null;
 let queue = Promise.resolve();
 const configPath: string | undefined = workerData?.configPath;
+const reports = new Map<string, { path: string; root: string }>();
+
+function registerReport(file: string | null, destDir: string) {
+  if (!file) return null;
+  const id = randomUUID();
+  reports.set(id, { path: canonicalPath(file), root: canonicalPath(destDir) });
+  return { id, path: file };
+}
+
+function resolveReport(input: unknown) {
+  const report = typeof input === "string" ? reports.get(input) : undefined;
+  if (!report) throw desktopError("REPORT_UNAVAILABLE");
+  try {
+    const resolved = canonicalPath(report.path);
+    if (
+      path.extname(report.path).toLowerCase() !== ".md" ||
+      resolved !== path.resolve(report.path) ||
+      !isInsideDir(report.root, resolved) ||
+      !fs.lstatSync(resolved).isFile()
+    )
+      throw desktopError("REPORT_UNAVAILABLE");
+    return resolved;
+  } catch {
+    throw desktopError("REPORT_UNAVAILABLE");
+  }
+}
 
 function settings() {
   const config = loadConfig(configPath);
@@ -40,10 +63,6 @@ function cleanConfig(config: object) {
   return Object.fromEntries(Object.entries(config).filter(([key]) => !key.startsWith("_")));
 }
 
-function configFingerprint() {
-  return JSON.stringify(settings().config);
-}
-
 function directory(value: unknown, label: string) {
   if (typeof value !== "string" || !value.trim() || !path.isAbsolute(value)) {
     throw desktopError("PATH_ABSOLUTE", { label });
@@ -53,18 +72,14 @@ function directory(value: unknown, label: string) {
   return resolved;
 }
 
-function fingerprint(file: string): Fingerprint {
-  const stat = fs.lstatSync(file);
-  if (!stat.isFile() || stat.isSymbolicLink()) throw desktopError("FILE_CHANGED");
-  return { size: stat.size, mtime: stat.mtimeMs, ino: stat.ino, dev: stat.dev };
-}
-
 async function dispatch(method: string, input: unknown, locale: "zh-CN" | "en") {
   switch (method) {
     case "getSettings":
       return settings();
     case "getDefaults":
       return structuredClone(DEFAULT_CONFIG);
+    case "resolveReport":
+      return resolveReport(input);
     case "saveConfig": {
       if (typeof input !== "string" || input.length > 1_000_000) throw desktopError("CONFIG_TOO_LARGE");
       let raw;
@@ -95,7 +110,6 @@ async function dispatch(method: string, input: unknown, locale: "zh-CN" | "en") 
         throw desktopError("ROOTS_OVERLAP");
       }
       const config = loadConfig(configPath);
-      const configText = JSON.stringify(cleanConfig(config));
       const result = await analyze({
         sourceDir,
         destDir,
@@ -104,55 +118,30 @@ async function dispatch(method: string, input: unknown, locale: "zh-CN" | "en") 
         recursive: request.recursive,
         onPhase: (phase, info) => parentPort!.postMessage({ progress: { phase, ...info } }),
       });
-      const files = new Map<string, Fingerprint>();
-      for (const file of result.sourceFiles) {
-        const current = fingerprint(file.path);
-        if (
-          current.size !== file.size ||
-          current.mtime !== (file.mtimeMs ?? file.mtime.getTime()) ||
-          current.ino !== file.ino ||
-          current.dev !== file.dev
-        )
-          throw desktopError("FILE_CHANGED_ANALYSIS");
-        files.set(file.path, current);
-      }
-      if (configFingerprint() !== configText) throw desktopError("CONFIG_CHANGED_ANALYSIS");
       const id = randomUUID();
       preview = {
         id,
         sourceDir,
         destDir,
-        configText,
         result,
-        files,
       };
-      return { planId: id, entries: result.entries, counts: result.counts };
+      return { planId: id, destDir, entries: result.entries, counts: result.counts };
     }
     case "execute": {
       if (!preview || input !== preview.id) throw desktopError("PREVIEW_EXPIRED");
       const plan = preview;
       preview = null;
-      if (configFingerprint() !== plan.configText) throw desktopError("CONFIG_CHANGED");
-      for (const entry of plan.result.entries) {
-        const before = plan.files.get(entry.from);
-        const current = fingerprint(entry.from);
-        if (JSON.stringify(before) !== JSON.stringify(current)) throw desktopError("FILE_CHANGED");
-        if (
-          !isInsideDir(plan.sourceDir, canonicalPath(entry.from)) ||
-          !isInsideDir(plan.destDir, canonicalPath(entry.to))
-        ) {
-          throw desktopError("PATH_ESCAPES");
-        }
-      }
       if (!plan.result.entries.length) throw desktopError("PLAN_EMPTY");
       const result = executePlan(plan.result.entries, {
         sourceDir: plan.sourceDir,
         destDir: plan.destDir,
         hashCache: plan.result.hashCache,
+        snapshot: plan.result.snapshot,
       });
       return {
         moved: result.moved.length,
         manifestPath: result.manifestPath,
+        similarReport: registerReport(result.similarReportPath, plan.destDir),
         reportErrors: result.reportErrors.map((e) => describeReportError(e.report, locale)),
       };
     }
@@ -164,7 +153,7 @@ async function dispatch(method: string, input: unknown, locale: "zh-CN" | "en") 
       const current = getLastRun(destDir);
       if (!current || current.manifestPath !== request.manifestPath) throw desktopError("UNDO_CHANGED");
       const result = undoRun(destDir, request.manifestPath);
-      return result ? { restored: result.restored, failures: result.failures.length } : null;
+      return result ? { restored: result.restored, failures: result.failures } : null;
     }
     default:
       throw desktopError("UNKNOWN_OPERATION");

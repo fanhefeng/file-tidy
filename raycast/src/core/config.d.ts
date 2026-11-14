@@ -1,3 +1,5 @@
+import type { FileRevision } from "./revision.js";
+
 export type Granularity = "month" | "year" | "none";
 export type MetadataField = "artist" | "albumArtist" | "album" | "title" | "genre" | "year";
 export interface ExtensionRule {
@@ -28,6 +30,8 @@ export interface TidyConfig {
   /** Default categories missing from the user's config file (added in a later version). */
   _staleCategories?: string[];
   _path?: string;
+  /** Internal identity of the exact file bytes loaded/saved; never persisted in user rules. */
+  _revision?: FileRevision;
 }
 export const DEFAULT_CONFIG: TidyConfig;
 export const METADATA_FIELDS: MetadataField[];

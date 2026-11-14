@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildExtensionIndex } from "./rules.js";
+import { fileRevision } from "./revision.js";
 
 const CONFIG_PATH = resolveConfigPath();
 
@@ -256,8 +257,11 @@ export function loadConfig(configPath = CONFIG_PATH) {
     return { ...saveConfig({}, configPath), _created: true };
   }
   let raw;
+  let revision;
   try {
-    raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    const contents = fs.readFileSync(configPath, "utf8");
+    revision = fileRevision(configPath, contents);
+    raw = JSON.parse(contents);
   } catch (err) {
     // code + configPath let adapters render this in their own language.
     const e = new Error(`Failed to parse config file (${configPath}): ${err.message}`, { cause: err });
@@ -265,7 +269,7 @@ export function loadConfig(configPath = CONFIG_PATH) {
     e.configPath = configPath;
     throw e;
   }
-  return { ...resolveConfig(raw), _path: configPath };
+  return { ...resolveConfig(raw), _path: configPath, _revision: revision };
 }
 
 /** Pure configuration resolution shared by every adapter, including editors. */
@@ -306,11 +310,14 @@ export function saveConfig(raw, configPath = CONFIG_PATH) {
   const config = resolveConfig(raw);
   configPath = path.resolve(configPath);
   const serializable = Object.fromEntries(Object.entries(config).filter(([key]) => !key.startsWith("_")));
+  const contents = JSON.stringify(serializable, null, 2) + "\n";
   const temp = `${configPath}.${randomUUID()}.tmp`;
+  let revision;
   try {
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.writeFileSync(temp, JSON.stringify(serializable, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+    fs.writeFileSync(temp, contents, { flag: "wx", mode: 0o600 });
     fs.renameSync(temp, configPath);
+    revision = fileRevision(configPath, contents);
   } catch (cause) {
     try {
       fs.rmSync(temp, { force: true });
@@ -322,7 +329,7 @@ export function saveConfig(raw, configPath = CONFIG_PATH) {
     err.configPath = configPath;
     throw err;
   }
-  return { ...config, _path: configPath };
+  return { ...config, _path: configPath, _revision: revision };
 }
 
 export const METADATA_FIELDS = ["artist", "albumArtist", "album", "title", "genre", "year"];
@@ -375,7 +382,7 @@ function validGrouping(value, field) {
 
 function validateConfig(settings) {
   for (const key of Object.keys(settings)) {
-    if (!Object.hasOwn(DEFAULT_CONFIG, key) && !["_path", "_created", "_staleCategories"].includes(key))
+    if (!Object.hasOwn(DEFAULT_CONFIG, key) && !["_path", "_created", "_staleCategories", "_revision"].includes(key))
       invalid(key, "is not a supported setting");
   }
   if ("dest" in settings && settings.dest !== null && typeof settings.dest !== "string")
@@ -517,6 +524,7 @@ export function tidyPath(destDir, ...sub) {
     const e = new Error(`${TIDY_DIR} in ${destDir} resolves outside it`);
     e.code = "TIDY_DIR_ESCAPES";
     e.destDir = destDir;
+    e.path = target;
     throw e;
   }
   return target;

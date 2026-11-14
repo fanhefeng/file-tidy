@@ -140,7 +140,7 @@ async function main() {
 
   if (flags.plain) config.detect = false;
 
-  const { entries, sourceFiles, counts, hashCache } = await analyze({
+  const { entries, sourceFiles, counts, hashCache, snapshot } = await analyze({
     sourceDir,
     destDir,
     config,
@@ -178,6 +178,7 @@ async function main() {
     destDir,
     sourceDir,
     hashCache,
+    snapshot,
     formatSimilarBlock,
   });
   console.log(
@@ -251,6 +252,10 @@ function formatError(err) {
       return `The ${err.label} name from your config is not a plain folder name: "${err.segment}"`;
     case "TIDY_DIR_ESCAPES":
       return `The .tidy folder in ${err.destDir} is a link pointing outside it, so tidy won't read or write its records there`;
+    case "PLAN_STALE":
+      return `The tidy plan is out of date because files or rules changed (${err.path}). Preview the folder again before moving any files`;
+    case "PATH_ESCAPES":
+      return `A file path leads outside the ${err.role === "source" ? "source" : "destination"} folder (${err.path}). Check folder links and preview again`;
     case "REPORT_WRITE":
       return `Every file was moved, but the ${REPORT_LABEL[err.report] ?? err.report} could not be written (${err.path}): ${err.cause?.message ?? ""}`;
     default:

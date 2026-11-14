@@ -40,7 +40,7 @@ Near-duplicates and similar images are heuristics, not proof, so they are never 
 - **Include subfolders** recurses into nested folders.
 - **Smart checks** turns the three detection passes off for a plain archive-and-dedupe run.
 
-Nothing is moved until you confirm the plan.
+Nothing is moved until you confirm the plan. Before execution, File Tidy rechecks the source files, duplicate keepers, loaded rules, and selected folders. If they changed, generate a new preview. Folder links that would route a file outside the selected destination are rejected before any files move.
 
 ### Undo Last Tidy
 

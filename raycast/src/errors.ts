@@ -14,6 +14,8 @@ interface CoreError extends Error {
   report?: string;
   field?: string;
   reason?: string;
+  root?: string;
+  role?: "source" | "destination";
 }
 
 const REPORT_LABEL: Record<string, string> = {
@@ -46,6 +48,16 @@ export function describeError(err: unknown, fallbackTitle: string): { title: str
       return {
         title: "Unusable .tidy folder",
         message: `The .tidy folder in ${e.destDir} is a link pointing outside it, so its records can't be trusted`,
+      };
+    case "PLAN_STALE":
+      return {
+        title: "Tidy plan is out of date",
+        message: `Files or rules changed at ${e.path}. Go back and preview the folder again before moving any files`,
+      };
+    case "PATH_ESCAPES":
+      return {
+        title: "File path leaves its folder",
+        message: `${e.path} leads outside the ${e.role === "source" ? "source" : "destination"} folder. Check folder links and preview again`,
       };
     case "EXDEV_VERIFY":
       return {

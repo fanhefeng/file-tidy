@@ -8,15 +8,25 @@ on:
 
 jobs:
   test:
-    name: test (node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
     strategy:
       # Report every version's result: a failure specific to the engines floor
       # is exactly what this matrix exists to catch.
       fail-fast: false
       matrix:
-        # Supported release lines pinned to the security baseline.
-        node: ["22.23.5", "24.22.3"]
+        # Every supported Node line plus each supported filesystem platform.
+        include:
+          - os: ubuntu-latest
+            node: "22.23.5"
+          - os: ubuntu-latest
+            node: "24.22.3"
+          - os: ubuntu-latest
+            node: "26.13.1"
+          - os: macos-latest
+            node: "26.13.1"
+          - os: windows-latest
+            node: "26.13.1"
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -50,7 +60,7 @@ jobs:
       - run: pnpm format:check
 
   raycast:
-    name: raycast (ray lint)
+    name: raycast (lint and build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -67,23 +77,57 @@ jobs:
       # lint failure never reaches the fork.
       - run: npm run lint
         working-directory: raycast
+      - run: npm run build
+        working-directory: raycast
 
   desktop:
-    name: desktop (build and worker integration)
-    runs-on: ubuntu-latest
+    name: desktop (${{ matrix.os }}, build, package, and smoke)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: "22.23.5"
+          node-version: "26.13.1"
           cache: npm
           cache-dependency-path: desktop/package-lock.json
       # Rule-model integration tests import the shared core from the root.
       - run: pnpm install --frozen-lockfile
       - run: npm ci
         working-directory: desktop
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       - run: npm test
         working-directory: desktop
+      - run: npm run package:dir
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - run: xvfb-run --auto-servernum npm run test:smoke -- --packaged --no-sandbox
+        if: runner.os == 'Linux'
+        working-directory: desktop
+      - run: npm run test:smoke -- --packaged
+        if: runner.os != 'Linux'
+        working-directory: desktop
+      - run: npm run package -- --publish never
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-distribution-${{ matrix.os }}
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.exe
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: desktop-smoke-${{ matrix.os }}
+          path: desktop/release/smoke/
+          if-no-files-found: ignore

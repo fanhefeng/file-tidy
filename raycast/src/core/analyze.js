@@ -7,6 +7,7 @@ import { scanDest, scanSource } from "./scan.js";
 import { findSimilar } from "./similar.js";
 import { compileRules } from "./rules.js";
 import { readAudioMetadata } from "./metadata.js";
+import { createSnapshot, trackKeepers, trackSources, validateSnapshot } from "./validation.js";
 
 /**
  * Scan, run every enabled detection pass, and build the plan — the whole
@@ -16,7 +17,9 @@ import { readAudioMetadata } from "./metadata.js";
  * `onPhase(phase, info)` reports progress: "scanning" | "dedup" | "health" |
  * "similar" | "perceptual" | "planning". Adapters own the wording.
  *
- * Returns { entries, sourceFiles, counts, hashCache }. `hashCache` is the
+ * Returns { entries, sourceFiles, counts, hashCache, snapshot }. Pass snapshot
+ * to executePlan so source, keeper, root or config changes invalidate a preview.
+ * `hashCache` is the
  * perceptual-hash cache state for executePlan to persist (null when the pass
  * didn't run) — analyze() itself never writes anything to disk. It runs before
  * any user confirmation (dry runs included), so a save here would be a lasting
@@ -29,6 +32,8 @@ export async function analyze({ sourceDir, destDir, config, recursive = false, i
   // adapters' "plain mode" switch can't silently miss a newly added key.
   const detect = (pass) => config.detect !== false && (config.detect?.[pass] ?? true);
   const organizedDirs = organizedDirNames(config);
+  const snapshot = createSnapshot({ sourceDir, destDir, config });
+  validateSnapshot(snapshot, { sourceDir, destDir });
 
   onPhase("scanning");
   const sourceFiles = scanSource(sourceDir, {
@@ -36,8 +41,10 @@ export async function analyze({ sourceDir, destDir, config, recursive = false, i
     excludeTopDirs: inPlace ? organizedDirs : undefined,
     includeJunk: detect("health"),
   });
+  trackSources(snapshot, sourceFiles);
+  validateSnapshot(snapshot, { sourceDir, destDir });
   if (!sourceFiles.length) {
-    return { entries: [], sourceFiles, counts: emptyCounts(), hashCache: null };
+    return { entries: [], sourceFiles, counts: emptyCounts(), hashCache: null, snapshot };
   }
 
   // Health first: junk and broken files are headed for review anyway, and they
@@ -61,6 +68,7 @@ export async function analyze({ sourceDir, destDir, config, recursive = false, i
 
   onPhase("dedup", { files: sound.length });
   const duplicates = await findDuplicates(sound, destFiles);
+  trackKeepers(snapshot, duplicates);
 
   const healthy = sound.filter((f) => !duplicates.has(f.path));
 
@@ -123,7 +131,8 @@ export async function analyze({ sourceDir, destDir, config, recursive = false, i
     metadata,
   });
 
-  return { entries, sourceFiles, counts: countBy(entries), hashCache };
+  validateSnapshot(snapshot, { sourceDir, destDir });
+  return { entries, sourceFiles, counts: countBy(entries), hashCache, snapshot };
 }
 
 /** Detection passes compare against archived files for context, but only source files are being moved. */

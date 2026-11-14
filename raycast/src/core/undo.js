@@ -76,7 +76,13 @@ export function undoRun(destDir, manifestPath) {
       moveFile(to, from);
       restored++;
     } catch (err) {
-      failures.push({ from, to, code: "error", message: err.message });
+      failures.push({
+        from,
+        to,
+        code: "error",
+        ...(typeof err.code === "string" && { errorCode: err.code }),
+        message: err.message,
+      });
     }
   }
 

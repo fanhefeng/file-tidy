@@ -56,6 +56,7 @@ function toSourceFile(full, name) {
     birthtime: realBirthtime(stat),
     mtime: stat.mtime,
     mtimeMs: stat.mtimeMs,
+    ctimeMs: stat.ctimeMs,
   };
 }
 

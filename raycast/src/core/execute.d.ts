@@ -1,5 +1,6 @@
 import type { HashCacheState } from "./analyze.js";
 import type { PlanEntry } from "./plan.js";
+import type { PlanSnapshot } from "./validation.js";
 
 /**
  * A record that could not be appended after the run had already moved every
@@ -17,6 +18,7 @@ export function executePlan(
     destDir: string;
     sourceDir: string;
     hashCache?: HashCacheState | null;
+    snapshot?: PlanSnapshot | null;
     formatDupBlock?: (dups: PlanEntry[]) => string;
     formatSimilarBlock?: (flagged: PlanEntry[], opts: { destDir: string }) => string;
   },

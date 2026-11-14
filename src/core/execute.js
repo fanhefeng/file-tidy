@@ -1,10 +1,11 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { tidyPath } from "./config.js";
+import { canonicalPath, isInsideDir, tidyPath } from "./config.js";
 import { moveFile } from "./move.js";
 import { saveHashCache } from "./phash.js";
 import { firstFreeName } from "./plan.js";
+import { validatePaths, validateSnapshot } from "./validation.js";
 
 /**
  * Execute the plan: move every file, resolving name collisions with " (n)"
@@ -16,12 +17,26 @@ import { firstFreeName } from "./plan.js";
  * the run — both happen after the last move, so they come back in reportErrors.
  * `hashCache` is analyze()'s perceptual-hash cache state; it is persisted here
  * rather than during analysis so a preview never writes into the destination.
+ * Adapters pass analyze()'s `snapshot` to reject stale previews before writing
+ * records. It remains optional for callers that directly construct a plan.
  * Returns { moved, manifestPath, similarReportPath, reportErrors }.
  */
 export function executePlan(
   entries,
-  { destDir, sourceDir, hashCache = null, formatDupBlock = defaultDupBlock, formatSimilarBlock = defaultSimilarBlock },
+  {
+    destDir,
+    sourceDir,
+    hashCache = null,
+    snapshot = null,
+    formatDupBlock = defaultDupBlock,
+    formatSimilarBlock = defaultSimilarBlock,
+  },
 ) {
+  // Check the whole batch before even creating .tidy: a later escaping entry
+  // must not leave earlier files moved without the user-approved destination.
+  const roots = { sourceRoot: canonicalPath(sourceDir), destinationRoot: canonicalPath(destDir) };
+  validatePaths(entries, roots);
+  validateSnapshot(snapshot, { sourceDir, destDir });
   const runsDir = tidyPath(destDir, "runs");
   fs.mkdirSync(runsDir, { recursive: true });
   const time = new Date().toISOString();
@@ -60,6 +75,9 @@ export function executePlan(
   writeManifest();
   for (const [i, entry] of entries.entries()) {
     const finalTo = resolveCollision(entry.to, dupManifest);
+    // This narrows the window for changes after preflight; Node's path-based
+    // fs calls cannot eliminate a symlink swap between this check and rename.
+    validatePaths([{ from: entry.from, to: finalTo }], roots);
     // Collected before the mkdir, while "doesn't exist yet" is still true.
     const newDirs = missingDirs(path.dirname(finalTo), destDir);
     // Everything the manifest doesn't already say must reach disk before the
@@ -120,6 +138,7 @@ export function executePlan(
     // archived.
     const resolved = dups.map((d) => ({ ...d, keeperPath: atFinalPath(d.keeperPath) }));
     try {
+      validateReportPath(dupManifest, roots.destinationRoot);
       fs.mkdirSync(path.dirname(dupManifest), { recursive: true });
       fs.appendFileSync(dupManifest, formatDupBlock(resolved));
     } catch (err) {
@@ -137,15 +156,17 @@ export function executePlan(
   const flagged = moved.filter((e) => e.similar || e.perceptual);
   let similarReportPath = null;
   if (flagged.length) {
-    // Safe outside the try: the same .tidy directory was already resolved for
-    // the run record above, so this can no longer be the call that rejects it.
-    const reportPath = tidyPath(destDir, "similar.md");
+    let reportPath;
     const resolved = flagged.map((e) => ({
       ...e,
       similar: e.similar && { ...e.similar, peers: e.similar.peers.map(atFinalPath) },
       perceptual: e.perceptual && { ...e.perceptual, peers: e.perceptual.peers.map(atFinalPath) },
     }));
     try {
+      // The report itself may be a link even when .tidy/runs was safe. This is
+      // already after every move, so rejecting it must remain a warning too.
+      reportPath = tidyPath(destDir, "similar.md");
+      validateReportPath(reportPath, roots.destinationRoot);
       fs.mkdirSync(path.dirname(reportPath), { recursive: true });
       // destDir is passed through so adapters can write paths relative to the
       // archive: the report sits inside it, and a full absolute path repeated
@@ -155,10 +176,25 @@ export function executePlan(
       // a block that never finished writing is not a report worth opening.
       similarReportPath = reportPath;
     } catch (err) {
-      recordFailure("similar", reportPath, err);
+      recordFailure("similar", reportPath ?? err.path ?? destDir, err);
     }
   }
   return { moved, manifestPath, similarReportPath, reportErrors };
+}
+
+function validateReportPath(target, destinationRoot) {
+  // A dangling leaf link is invisible to canonicalPath's existsSync walk, but
+  // appendFile would follow it and create the referent. Reports own their leaf
+  // files; only directory links within the selected destination are supported.
+  const linked = fs.lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink();
+  if (linked || !isInsideDir(destinationRoot, canonicalPath(target))) {
+    const err = new Error(`The report path is a symbolic link or resolves outside the selected destination: ${target}`);
+    err.code = "PATH_ESCAPES";
+    err.path = target;
+    err.root = destinationRoot;
+    err.role = "destination";
+    throw err;
+  }
 }
 
 /** Directories between `dir` and `stopDir` that don't exist yet, deepest first. */

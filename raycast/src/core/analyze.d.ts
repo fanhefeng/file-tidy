@@ -2,6 +2,8 @@ import type { TidyConfig } from "./config.js";
 import type { HashCacheEntry } from "./phash.js";
 import type { PlanEntry } from "./plan.js";
 import type { SourceFile } from "./scan.js";
+import type { PlanSnapshot } from "./validation.js";
+export type { PlanSnapshot } from "./validation.js";
 
 export type Phase = "scanning" | "dedup" | "health" | "similar" | "perceptual" | "metadata" | "planning";
 
@@ -34,4 +36,5 @@ export function analyze(input: {
   sourceFiles: SourceFile[];
   counts: AnalyzeCounts;
   hashCache: HashCacheState | null;
+  snapshot: PlanSnapshot;
 }>;

@@ -1,3 +1,9 @@
+import type { SimilarInfo } from "../../src/core/similar.js";
+import type { PerceptualInfo } from "../../src/core/phash.js";
+import type { UndoFailure } from "../../src/core/undo.js";
+import type { Locale } from "./locale.js";
+export type { UndoFailure } from "../../src/core/undo.js";
+
 export interface Settings {
   config: Record<string, unknown>;
   configPath: string;
@@ -25,12 +31,13 @@ export interface PlanEntry {
   metadataStatus?: "read" | "missing" | "unreadable";
   issue?: string;
   issueDetail?: string;
-  similar?: unknown;
-  perceptual?: unknown;
+  similar?: SimilarInfo;
+  perceptual?: PerceptualInfo;
 }
 
 export interface Analysis {
   planId: string;
+  destDir: string;
   entries: PlanEntry[];
   counts: { archive: number; duplicate: number; review: number; similar: number; perceptual: number };
 }
@@ -48,6 +55,11 @@ export interface LastRun {
   manifestPath: string;
 }
 
+export interface ReportReference {
+  id: string;
+  path: string;
+}
+
 export interface TidyBridge {
   getPreferences(): Promise<UiPreferences>;
   setLocale(locale: Locale): Promise<UiPreferences>;
@@ -55,9 +67,15 @@ export interface TidyBridge {
   getDefaults(): Promise<Record<string, unknown>>;
   chooseDirectory(): Promise<string | null>;
   analyze(input: AnalyzeInput): Promise<Analysis>;
-  execute(planId: string): Promise<{ moved: number; manifestPath: string; reportErrors: string[] }>;
+  execute(planId: string): Promise<{
+    moved: number;
+    manifestPath: string;
+    similarReport: ReportReference | null;
+    reportErrors: string[];
+  }>;
+  openReport(reportId: string): Promise<null>;
   getLastRun(destDir: string): Promise<LastRun | null>;
-  undo(destDir: string, manifestPath: string): Promise<{ restored: number; failures: number } | null>;
+  undo(destDir: string, manifestPath: string): Promise<{ restored: number; failures: UndoFailure[] } | null>;
   saveConfig(jsonText: string): Promise<Settings>;
   onProgress(callback: (progress: Progress) => void): () => void;
 }
@@ -67,8 +85,6 @@ declare global {
     tidy: TidyBridge;
   }
 }
-import type { Locale } from "./locale.js";
-
 export interface UiPreferences {
   locale: Locale;
 }
