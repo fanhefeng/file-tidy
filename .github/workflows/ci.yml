@@ -105,6 +105,9 @@ jobs:
         working-directory: desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # This job has no signing secrets; mac.identity is the ad-hoc "-" identity.
+          # electron-builder otherwise skips even ad-hoc signing in PR builds.
+          CSC_FOR_PULL_REQUEST: ${{ runner.os == 'macOS' && 'true' || 'false' }}
       - run: xvfb-run --auto-servernum npm run test:smoke -- --packaged --no-sandbox
         if: runner.os == 'Linux'
         working-directory: desktop
@@ -115,6 +118,9 @@ jobs:
         working-directory: desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # This job has no signing secrets; mac.identity is the ad-hoc "-" identity.
+          # electron-builder otherwise skips even ad-hoc signing in PR builds.
+          CSC_FOR_PULL_REQUEST: ${{ runner.os == 'macOS' && 'true' || 'false' }}
       # Build a real older source revision, not the current code with a fake version.
       - uses: actions/checkout@v7
         if: runner.os == 'Windows'
