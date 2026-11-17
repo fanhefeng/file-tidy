@@ -49,9 +49,12 @@ function Read-Installation([string]$ExpectedVersion) {
     $exe = Join-Path $directory 'File Tidy.exe'
     if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Installed executable is missing.' }
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'Uninstaller is missing.' }
-    if ((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion -ne $ExpectedVersion) {
-        throw 'Installed executable version does not match the registration.'
+    $binaryVersion = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion
+    # PE resources use four numeric components for these stable semver builds.
+    if ($binaryVersion -ne $ExpectedVersion -and $binaryVersion -ne "$ExpectedVersion.0") {
+        throw "Installed executable version [$binaryVersion] does not match [$ExpectedVersion]."
     }
+    Write-Host "Verified binary version $binaryVersion and registry version $ExpectedVersion"
     return @{ Exe = $exe; Uninstaller = $uninstaller; RegistryPath = $entry.PSPath; Directory = $directory }
 }
 function Test-InstalledApp($Installation, [string]$Stage) {
