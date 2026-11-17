@@ -58,3 +58,9 @@ A preview ID references the plan in the worker; the renderer cannot provide its 
 ## macOS icon assets
 
 The macOS Dock and bundle use a dedicated transparent icon rather than the opaque square used inside the interface. `resources/icon-macos.png` is the 1024px source; `resources/icon.icns` includes small and Retina representations. On macOS, run `npm run icon:macos` after updating the source. A guarded runtime `app.dock.setIcon` call uses the same PNG in development and packaged builds. It updates the running app without changing system Dock settings.
+
+## Windows installer lifecycle CI
+
+The Windows CI job builds the pinned `desktop-v0.5.3` source as an upgrade baseline, installs it into a clean disposable runner, upgrades in place to the current build, uninstalls, and tests a fresh current-version install. The upgraded and freshly installed current-version executables run the renderer smoke suite via `--executable /absolute/path`; registration, executable versions, and preservation of a test classification-rules file are checked. Diagnostics and SHA-256 hashes are uploaded with the smoke artifacts. The PowerShell lifecycle script refuses to run outside GitHub Actions Windows or over an existing installation/rules directory.
+
+These are silent per-user NSIS tests on a Windows CI VM, not physical-device, interactive wizard, SmartScreen, code-signing, or automatic-update acceptance. The workflow never publishes Windows downloads.

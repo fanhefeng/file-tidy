@@ -105,6 +105,9 @@ jobs:
         working-directory: desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # This job has no signing secrets; mac.identity is the ad-hoc "-" identity.
+          # electron-builder otherwise skips even ad-hoc signing in PR builds.
+          CSC_FOR_PULL_REQUEST: ${{ runner.os == 'macOS' && 'true' || 'false' }}
       - run: xvfb-run --auto-servernum npm run test:smoke -- --packaged --no-sandbox
         if: runner.os == 'Linux'
         working-directory: desktop
@@ -115,6 +118,35 @@ jobs:
         working-directory: desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # This job has no signing secrets; mac.identity is the ad-hoc "-" identity.
+          # electron-builder otherwise skips even ad-hoc signing in PR builds.
+          CSC_FOR_PULL_REQUEST: ${{ runner.os == 'macOS' && 'true' || 'false' }}
+      # Build a real older source revision, not the current code with a fake version.
+      - uses: actions/checkout@v7
+        if: runner.os == 'Windows'
+        with:
+          ref: 5c7a1314137a9bf22d612cc1e815aa22c3d282eb # desktop-v0.5.3
+          path: previous-desktop
+          persist-credentials: false
+      - name: Install upgrade baseline core dependencies
+        if: runner.os == 'Windows'
+        working-directory: previous-desktop
+        run: pnpm install --frozen-lockfile
+      - name: Build Windows upgrade baseline (0.5.3)
+        if: runner.os == 'Windows'
+        working-directory: previous-desktop/desktop
+        run: |
+          npm ci
+          npm run package -- --win --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Verify installed Windows lifecycle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          $version = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
+          ./desktop/scripts/test-windows-installer.ps1 -Installer "desktop/release/File Tidy Setup $version.exe" -Version $version -PreviousInstaller "previous-desktop/desktop/release/File Tidy Setup 0.5.3.exe" -PreviousVersion '0.5.3'
       - run: codesign --verify --deep --strict release/mac*/"File Tidy.app"
         if: runner.os == 'macOS'
         working-directory: desktop
