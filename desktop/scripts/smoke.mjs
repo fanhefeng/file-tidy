@@ -11,6 +11,7 @@ const desktop = fileURLToPath(new URL("..", import.meta.url));
 const { values } = parseArgs({
   options: {
     packaged: { type: "boolean", default: false },
+    executable: { type: "string" },
     output: { type: "string", default: path.join(desktop, "release", "smoke") },
     "no-sandbox": { type: "boolean", default: false },
   },
@@ -298,8 +299,12 @@ async function responsiveLayouts() {
 }
 
 async function launch() {
-  const executable = values.packaged ? packagedExecutable() : createRequire(import.meta.url)("electron");
-  const args = values.packaged ? [] : [desktop];
+  const executable = values.executable
+    ? path.resolve(values.executable)
+    : values.packaged
+      ? packagedExecutable()
+      : createRequire(import.meta.url)("electron");
+  const args = values.packaged || values.executable ? [] : [desktop];
   args.push("--user-data-dir=" + userData, "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0");
   if (values["no-sandbox"]) args.push("--no-sandbox");
   const environment = { ...process.env, XDG_CONFIG_HOME: configHome, APPDATA: configHome };
@@ -573,7 +578,8 @@ try {
     JSON.stringify(
       {
         ok: !failure,
-        packaged: values.packaged,
+        packaged: values.packaged || Boolean(values.executable),
+        executable: values.executable ? path.resolve(values.executable) : undefined,
         platform: process.platform,
         checks,
         ...(failure ? { error: String(failure) } : {}),
